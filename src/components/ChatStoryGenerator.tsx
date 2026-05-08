@@ -649,7 +649,28 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
-        {/* Generate audios — no manual voice mapping */}
+        {/* Voice mapping — manual voice IDs per character */}
+        {uniqueCharacters.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold">Voice Mapping</h2>
+            <p className="text-xs text-muted-foreground">
+              Cole o Voice ID ({provider === "elevenlabs" ? "ElevenLabs" : "Minimax"}) para cada
+              personagem encontrado nos scripts.
+            </p>
+            {uniqueCharacters.map((name) => (
+              <div key={name} className="grid grid-cols-3 gap-2 items-center">
+                <Label className="col-span-1 truncate">{name}</Label>
+                <Input
+                  className="col-span-2"
+                  placeholder="Voice ID"
+                  value={voiceMap[name.toLowerCase().trim()] || ""}
+                  onChange={(e) => setVoiceFor(name, e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         <Button
           onClick={generateAudios}
           disabled={generating}
