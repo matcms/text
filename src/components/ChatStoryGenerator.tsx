@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Video, Image as ImageIcon, Loader2, Play } from "lucide-react";
+import { ChevronLeft, Video, Image as ImageIcon, Loader2, Play, Upload, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +19,7 @@ type ImgMsg = {
   side: string;
   type: "image";
   text: string;
+  imageUrl: string | null;
 };
 type Msg = TextMsg | ImgMsg;
 
@@ -38,6 +39,9 @@ export default function ChatStoryGenerator() {
   const [genProgress, setGenProgress] = useState({ done: 0, total: 0 });
   const [visibleMessages, setVisibleMessages] = useState<Msg[]>([]);
   const [playing, setPlaying] = useState(false);
+  // delay offset in ms: negative = faster, positive = slower. Applied to both audio + image pauses.
+  const [delayOffset, setDelayOffset] = useState(0);
+  const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   useEffect(() => {
     const k = localStorage.getItem("elevenlabs_api_key");
@@ -53,6 +57,11 @@ export default function ChatStoryGenerator() {
     messages.forEach((m) => m.type === "text" && set.add(m.character));
     return Array.from(set);
   }, [messages]);
+
+  const imageMessages = useMemo(
+    () => messages.filter((m): m is ImgMsg => m.type === "image"),
+    [messages]
+  );
 
   const allAudiosReady = useMemo(() => {
     const texts = messages.filter((m) => m.type === "text") as TextMsg[];
@@ -71,7 +80,13 @@ export default function ChatStoryGenerator() {
       }
       const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
       if (imgMatch) {
-        parsed.push({ id: id++, side: imgMatch[1], type: "image", text: imgMatch[2] });
+        parsed.push({
+          id: id++,
+          side: imgMatch[1],
+          type: "image",
+          text: imgMatch[2],
+          imageUrl: null,
+        });
         continue;
       }
       const textMatch = line.match(/^(\d):\s*(.+?)>\s*(.*)$/);
@@ -89,6 +104,17 @@ export default function ChatStoryGenerator() {
     setContactName(header);
     setMessages(parsed);
     setVisibleMessages([]);
+  };
+
+  const setImageUrlFor = (id: number, url: string | null) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id && m.type === "image" ? { ...m, imageUrl: url } : m))
+    );
+  };
+
+  const onUploadImage = (id: number, file: File) => {
+    const url = URL.createObjectURL(file);
+    setImageUrlFor(id, url);
   };
 
   const generateAudios = async () => {
@@ -142,6 +168,12 @@ export default function ChatStoryGenerator() {
     setPlaying(true);
     setVisibleMessages([]);
     const queue: Msg[] = [];
+    // base pauses; offset can shorten or extend them, clamped to >= 0
+    const basePauseAfterAudio = 300;
+    const baseImagePause = 1200;
+    const pauseAfterAudio = Math.max(0, basePauseAfterAudio + delayOffset);
+    const imagePause = Math.max(0, baseImagePause + delayOffset);
+
     for (const msg of messages) {
       queue.push(msg);
       setVisibleMessages([...queue]);
@@ -149,9 +181,9 @@ export default function ChatStoryGenerator() {
         const audio = new Audio(msg.audioUrl);
         audio.play();
         await new Promise((r) => (audio.onended = () => r(null)));
-        await new Promise((r) => setTimeout(r, 300));
+        if (pauseAfterAudio > 0) await new Promise((r) => setTimeout(r, pauseAfterAudio));
       } else {
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, imagePause));
       }
     }
     setPlaying(false);
@@ -191,6 +223,38 @@ export default function ChatStoryGenerator() {
           Parse Script
         </Button>
 
+        {/* Delay control */}
+        <div className="space-y-2 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <Label>Message delay offset (ms)</Label>
+            <span className="text-xs text-muted-foreground">
+              {delayOffset > 0 ? `+${delayOffset}` : delayOffset} ms
+            </span>
+          </div>
+          <Input
+            type="number"
+            step={50}
+            value={delayOffset}
+            onChange={(e) => setDelayOffset(Number(e.target.value) || 0)}
+            placeholder="0"
+          />
+          <p className="text-xs text-muted-foreground">
+            Negative values speed messages up, positive values slow them down. Applied to the
+            pause after each message (clamped at 0).
+          </p>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" variant="outline" onClick={() => setDelayOffset((d) => d - 100)}>
+              -100ms
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setDelayOffset(0)}>
+              Reset
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setDelayOffset((d) => d + 100)}>
+              +100ms
+            </Button>
+          </div>
+        </div>
+
         {characters.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
             <h2 className="font-semibold">Voice Mapping</h2>
@@ -220,6 +284,71 @@ export default function ChatStoryGenerator() {
                 "Generate Audios"
               )}
             </Button>
+          </div>
+        )}
+
+        {imageMessages.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold flex items-center gap-2">
+              <ImageIcon className="h-4 w-4" /> Images
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Provide an image for each <code>img:</code> entry — paste a URL or upload a file.
+            </p>
+            {imageMessages.map((m) => (
+              <div key={m.id} className="space-y-2 rounded-md border p-3">
+                <div className="text-xs text-muted-foreground">
+                  Side {m.side} — “{m.text}”
+                </div>
+                <div className="flex gap-2 items-center">
+                  <Link2 className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="https://image-url..."
+                    value={m.imageUrl?.startsWith("blob:") ? "" : m.imageUrl ?? ""}
+                    onChange={(e) => setImageUrlFor(m.id, e.target.value || null)}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={(el) => {
+                      fileInputRefs.current[m.id] = el;
+                    }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onUploadImage(m.id, f);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRefs.current[m.id]?.click()}
+                  >
+                    <Upload className="mr-2 h-3 w-3" /> Upload
+                  </Button>
+                  {m.imageUrl && (
+                    <>
+                      <img
+                        src={m.imageUrl}
+                        alt={m.text}
+                        className="h-12 w-12 object-cover rounded-md border"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setImageUrlFor(m.id, null)}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -279,6 +408,12 @@ export default function ChatStoryGenerator() {
                     >
                       {m.text}
                     </div>
+                  ) : m.imageUrl ? (
+                    <img
+                      src={m.imageUrl}
+                      alt={m.text}
+                      className="max-w-[70%] max-h-56 object-cover rounded-2xl"
+                    />
                   ) : (
                     <div className="h-32 w-48 bg-zinc-800 rounded-2xl flex flex-col items-center justify-center text-zinc-300 text-xs gap-2 p-2">
                       <ImageIcon className="h-8 w-8" />
