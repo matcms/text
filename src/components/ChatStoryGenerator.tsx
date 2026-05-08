@@ -457,7 +457,7 @@ export default function ChatStoryGenerator() {
           >
             <style>{`.chat-scroll::-webkit-scrollbar{display:none}`}</style>
             <AnimatePresence>
-              {visibleMessages.map((m) => (
+              {(playing ? visibleMessages : messages).map((m) => (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: 0, y: 20 }}
