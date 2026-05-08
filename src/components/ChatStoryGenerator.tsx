@@ -91,8 +91,8 @@ export default function ChatStoryGenerator() {
   // pause between messages, in SECONDS (e.g. 0.1, 0.3, 1)
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
 
-  // cache: voice name (lowercased) -> voiceId, fetched from ElevenLabs
-  const [elevenVoices, setElevenVoices] = useState<Record<string, string>>({});
+  // manual mapping: character name (lowercased) -> voice ID
+  const [voiceMap, setVoiceMap] = useState<Record<string, string>>({});
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
