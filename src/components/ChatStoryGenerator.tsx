@@ -414,15 +414,12 @@ export default function ChatStoryGenerator() {
             <Input
               type="password"
               value={elevenKey}
-              onChange={(e) => {
-                setElevenKey(e.target.value);
-                setElevenVoices({});
-              }}
+              onChange={(e) => setElevenKey(e.target.value)}
               placeholder="sk_..."
             />
             <p className="text-xs text-muted-foreground">
-              O nome em <code>nome&gt;</code> deve corresponder a uma voz da sua biblioteca
-              ElevenLabs.
+              Informe um Voice ID por personagem na seção "Voice Mapping".
+            </p>
             </p>
           </div>
           <div className="space-y-2">
