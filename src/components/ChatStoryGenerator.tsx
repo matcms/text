@@ -42,7 +42,6 @@ type Chat = {
   contactPhoto: string | null;
   script: string;
   messages: Msg[];
-  voices: Record<string, string>; // character -> voiceId
 };
 
 type Provider = "elevenlabs" | "minimax";
@@ -60,7 +59,6 @@ const newChat = (i: number): Chat => ({
   contactPhoto: null,
   script: DEFAULT_SCRIPT,
   messages: [],
-  voices: {},
 });
 
 // Convert minimax hex string to a Blob URL
@@ -88,8 +86,13 @@ export default function ChatStoryGenerator() {
   const [genProgress, setGenProgress] = useState({ done: 0, total: 0 });
   const [visibleMessages, setVisibleMessages] = useState<Msg[]>([]);
   const [playing, setPlaying] = useState(false);
-  // delay between consecutive messages, separate from voice speed
-  const [delayOffset, setDelayOffset] = useState(0);
+  const [playingChatId, setPlayingChatId] = useState<string | null>(null);
+
+  // pause between messages, in SECONDS (e.g. 0.1, 0.3, 1)
+  const [messagePauseSec, setMessagePauseSec] = useState(0.3);
+
+  // cache: voice name (lowercased) -> voiceId, fetched from ElevenLabs
+  const [elevenVoices, setElevenVoices] = useState<Record<string, string>>({});
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -111,16 +114,12 @@ export default function ChatStoryGenerator() {
     localStorage.setItem("minimax_group_id", minimaxGroupId);
   }, [minimaxGroupId]);
 
-  // helpers to update active chat
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
   };
-
-  const characters = useMemo(() => {
-    const set = new Set<string>();
-    activeChat.messages.forEach((m) => m.type === "text" && set.add(m.character));
-    return Array.from(set);
-  }, [activeChat.messages]);
+  const updateChatById = (id: string, patch: Partial<Chat>) => {
+    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  };
 
   const imageMessages = useMemo(
     () => activeChat.messages.filter((m): m is ImgMsg => m.type === "image"),
@@ -128,9 +127,10 @@ export default function ChatStoryGenerator() {
   );
 
   const allAudiosReady = useMemo(() => {
-    const texts = activeChat.messages.filter((m) => m.type === "text") as TextMsg[];
+    const all = chats.flatMap((c) => c.messages);
+    const texts = all.filter((m) => m.type === "text") as TextMsg[];
     return texts.length > 0 && texts.every((m) => !!m.audioUrl);
-  }, [activeChat.messages]);
+  }, [chats]);
 
   const parseScript = () => {
     const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -183,6 +183,43 @@ export default function ChatStoryGenerator() {
 
   const onUploadContactPhoto = (file: File) => {
     updateActiveChat({ contactPhoto: URL.createObjectURL(file) });
+  };
+
+  const pasteContactPhoto = async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const imgType = it.types.find((t) => t.startsWith("image/"));
+        if (imgType) {
+          const blob = await it.getType(imgType);
+          const file = new File([blob], "contact.png", { type: imgType });
+          onUploadContactPhoto(file);
+          return;
+        }
+      }
+      const text = await navigator.clipboard.readText();
+      if (text && /^https?:\/\//i.test(text.trim())) {
+        updateActiveChat({ contactPhoto: text.trim() });
+      }
+    } catch {
+      alert("Não foi possível ler o clipboard.");
+    }
+  };
+
+  // ---- ElevenLabs voice library lookup by name ----
+  const fetchElevenVoices = async (): Promise<Record<string, string>> => {
+    if (Object.keys(elevenVoices).length > 0) return elevenVoices;
+    const res = await fetch("https://api.elevenlabs.io/v2/voices", {
+      headers: { "xi-api-key": elevenKey },
+    });
+    if (!res.ok) throw new Error("Falha ao buscar vozes do ElevenLabs: " + (await res.text()));
+    const json = await res.json();
+    const map: Record<string, string> = {};
+    for (const v of json.voices || []) {
+      if (v.name && v.voice_id) map[v.name.toLowerCase().trim()] = v.voice_id;
+    }
+    setElevenVoices(map);
+    return map;
   };
 
   // ---- TTS providers ----
@@ -247,80 +284,114 @@ export default function ChatStoryGenerator() {
 
   const generateAudios = async () => {
     if (provider === "elevenlabs" && !elevenKey) {
-      alert("Please enter your ElevenLabs API key");
+      alert("Por favor, insira sua API key do ElevenLabs");
       return;
     }
     if (provider === "minimax" && !minimaxKey) {
-      alert("Please enter your Minimax API key");
+      alert("Por favor, insira sua API key do Minimax");
       return;
     }
-    const texts = activeChat.messages.filter((m) => m.type === "text") as TextMsg[];
-    const missing = texts.find((m) => !activeChat.voices[m.character]);
-    if (missing) {
-      alert(`Please set a voice ID for ${missing.character}`);
-      return;
-    }
-    setGenerating(true);
-    setGenProgress({ done: 0, total: texts.length });
-    const updated = [...activeChat.messages];
-    let done = 0;
-    for (let i = 0; i < updated.length; i++) {
-      const m = updated[i];
-      if (m.type !== "text") continue;
+
+    // Pre-fetch voice library for elevenlabs
+    let voiceMap: Record<string, string> = {};
+    if (provider === "elevenlabs") {
       try {
-        const voiceId = activeChat.voices[m.character];
+        voiceMap = await fetchElevenVoices();
+      } catch (e) {
+        alert((e as Error).message);
+        return;
+      }
+    }
+
+    const allTexts = chats.flatMap((c) =>
+      c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
+    );
+    if (allTexts.length === 0) {
+      alert("Faça o parse do script primeiro.");
+      return;
+    }
+
+    setGenerating(true);
+    setGenProgress({ done: 0, total: allTexts.length });
+
+    let done = 0;
+    // build a working snapshot per chat
+    const chatMessagesMap: Record<string, Msg[]> = {};
+    chats.forEach((c) => (chatMessagesMap[c.id] = [...c.messages]));
+
+    for (const { chatId, msg } of allTexts) {
+      try {
+        let voiceId = "";
+        if (provider === "elevenlabs") {
+          voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
+          if (!voiceId) {
+            throw new Error(
+              `Voz "${msg.character}" não encontrada na sua biblioteca do ElevenLabs. Adicione essa voz na biblioteca ou use o nome exato.`
+            );
+          }
+        } else {
+          // Minimax: use the character name directly as voice_id
+          voiceId = msg.character;
+        }
+
         const audioUrl =
           provider === "elevenlabs"
-            ? await ttsElevenLabs(m.text, voiceId)
-            : await ttsMinimax(m.text, voiceId);
-        updated[i] = { ...m, audioUrl };
+            ? await ttsElevenLabs(msg.text, voiceId)
+            : await ttsMinimax(msg.text, voiceId);
+
+        const arr = chatMessagesMap[chatId];
+        const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
+        if (idx >= 0) arr[idx] = { ...(arr[idx] as TextMsg), audioUrl };
+        updateChatById(chatId, { messages: [...arr] });
       } catch (e) {
         console.error(e);
-        alert(`Failed to generate audio for: ${m.text}\n${(e as Error).message}`);
+        alert(`Falha ao gerar áudio para: ${msg.text}\n${(e as Error).message}`);
         setGenerating(false);
         return;
       }
       done++;
-      setGenProgress({ done, total: texts.length });
-      updateActiveChat({ messages: [...updated] });
+      setGenProgress({ done, total: allTexts.length });
     }
     setGenerating(false);
   };
 
   const playAnimation = async () => {
     setPlaying(true);
-    setVisibleMessages([]);
-    const queue: Msg[] = [];
-    const basePauseAfterAudio = 300;
-    const baseImagePause = 1200;
-    const baseBetweenMessages = 250;
-    const pauseAfterAudio = Math.max(0, basePauseAfterAudio + delayOffset);
-    const imagePause = Math.max(0, baseImagePause + delayOffset);
-    const betweenMessages = Math.max(0, baseBetweenMessages + delayOffset);
+    const pauseMs = Math.max(0, Math.round(messagePauseSec * 1000));
 
     const scrollDown = () => {
       const el = chatScrollRef.current;
       if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     };
 
-    for (let i = 0; i < activeChat.messages.length; i++) {
-      const msg = activeChat.messages[i];
-      queue.push(msg);
-      setVisibleMessages([...queue]);
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-      scrollDown();
-      if (msg.type === "text" && msg.audioUrl) {
-        const audio = new Audio(msg.audioUrl);
-        audio.play();
-        await new Promise((r) => (audio.onended = () => r(null)));
-        if (pauseAfterAudio > 0) await new Promise((r) => setTimeout(r, pauseAfterAudio));
-      } else {
-        await new Promise((r) => setTimeout(r, imagePause));
-      }
-      if (i < activeChat.messages.length - 1 && betweenMessages > 0) {
-        await new Promise((r) => setTimeout(r, betweenMessages));
+    for (const chat of chats) {
+      // switch the displayed chat (header switches too)
+      setPlayingChatId(chat.id);
+      setActiveChatId(chat.id);
+      setVisibleMessages([]);
+      // small breath between chat transitions
+      await new Promise((r) => setTimeout(r, 400));
+
+      const queue: Msg[] = [];
+      for (let i = 0; i < chat.messages.length; i++) {
+        const msg = chat.messages[i];
+        queue.push(msg);
+        setVisibleMessages([...queue]);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        scrollDown();
+        if (msg.type === "text" && msg.audioUrl) {
+          const audio = new Audio(msg.audioUrl);
+          audio.play();
+          await new Promise((r) => (audio.onended = () => r(null)));
+        } else {
+          await new Promise((r) => setTimeout(r, Math.max(800, pauseMs * 3)));
+        }
+        if (i < chat.messages.length - 1 && pauseMs > 0) {
+          await new Promise((r) => setTimeout(r, pauseMs));
+        }
       }
     }
+    setPlayingChatId(null);
     setPlaying(false);
   };
 
@@ -338,6 +409,11 @@ export default function ChatStoryGenerator() {
     if (id === activeChatId) setActiveChatId(remaining[0].id);
   };
 
+  // The chat to display in the right column
+  const displayChat = playingChatId
+    ? chats.find((c) => c.id === playingChatId) || activeChat
+    : activeChat;
+
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
       {/* LEFT */}
@@ -345,7 +421,7 @@ export default function ChatStoryGenerator() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Chat Story Generator</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Parse a script, generate AI voices, and play a synced iMessage video.
+            Cole um script, gere as vozes via API e reproduza um vídeo iMessage sincronizado.
           </p>
         </div>
 
@@ -356,9 +432,16 @@ export default function ChatStoryGenerator() {
             <Input
               type="password"
               value={elevenKey}
-              onChange={(e) => setElevenKey(e.target.value)}
+              onChange={(e) => {
+                setElevenKey(e.target.value);
+                setElevenVoices({});
+              }}
               placeholder="sk_..."
             />
+            <p className="text-xs text-muted-foreground">
+              O nome em <code>nome&gt;</code> deve corresponder a uma voz da sua biblioteca
+              ElevenLabs.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Minimax API Key</Label>
@@ -410,7 +493,7 @@ export default function ChatStoryGenerator() {
               onChange={(e) => setVoiceSpeed(Number(e.target.value))}
             />
             <p className="text-xs text-muted-foreground">
-              Velocidade da fala. ElevenLabs aceita 0.7–1.2; Minimax 0.5–2.0.
+              ElevenLabs aceita 0.7–1.2; Minimax 0.5–2.0.
             </p>
           </div>
         </div>
@@ -467,14 +550,36 @@ export default function ChatStoryGenerator() {
         </div>
 
         {/* Contact photo */}
-        <div className="space-y-2 rounded-lg border p-4">
+        <div
+          className="space-y-2 rounded-lg border p-4"
+          tabIndex={0}
+          onPaste={(e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const it of Array.from(items)) {
+              if (it.type.startsWith("image/")) {
+                const file = it.getAsFile();
+                if (file) {
+                  e.preventDefault();
+                  onUploadContactPhoto(file);
+                  return;
+                }
+              }
+            }
+            const text = e.clipboardData?.getData("text");
+            if (text && /^https?:\/\//i.test(text.trim())) {
+              e.preventDefault();
+              updateActiveChat({ contactPhoto: text.trim() });
+            }
+          }}
+        >
           <Label className="flex items-center gap-2">
             <User className="h-4 w-4" /> Contact photo (opcional)
           </Label>
           <p className="text-xs text-muted-foreground">
-            Sem foto, mostramos a inicial em maiúsculo.
+            Cole uma imagem (Ctrl/Cmd+V), uma URL, ou envie um arquivo. Sem foto, mostramos a inicial.
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {activeChat.contactPhoto ? (
               <img
                 src={activeChat.contactPhoto}
@@ -498,6 +603,9 @@ export default function ChatStoryGenerator() {
             />
             <Button size="sm" variant="outline" onClick={() => photoInputRef.current?.click()}>
               <Upload className="mr-2 h-3 w-3" /> Upload
+            </Button>
+            <Button size="sm" variant="outline" onClick={pasteContactPhoto}>
+              <ClipboardPaste className="mr-2 h-3 w-3" /> Colar
             </Button>
             {activeChat.contactPhoto && (
               <Button
@@ -524,77 +632,61 @@ export default function ChatStoryGenerator() {
           Parse Script
         </Button>
 
-        {/* Delay control */}
+        {/* Pause control (in seconds) */}
         <div className="space-y-2 rounded-lg border p-4">
           <div className="flex items-center justify-between">
-            <Label>Pause between messages (ms)</Label>
+            <Label>Pausa entre mensagens (segundos)</Label>
             <span className="text-xs text-muted-foreground">
-              {delayOffset > 0 ? `+${delayOffset}` : delayOffset} ms
+              {messagePauseSec.toFixed(2)}s
             </span>
           </div>
           <Input
             type="number"
-            step={50}
-            value={delayOffset}
-            onChange={(e) => setDelayOffset(Number(e.target.value) || 0)}
-            placeholder="0"
+            step={0.05}
+            min={0}
+            value={messagePauseSec}
+            onChange={(e) => setMessagePauseSec(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="0.3"
           />
           <p className="text-xs text-muted-foreground">
-            Ajusta a pausa <strong>entre uma fala e outra</strong>. Para ajustar a velocidade
-            da voz, use o controle <em>Voice Speed</em> acima.
+            Tempo de espera entre uma mensagem e a próxima. Ex.: <code>0.1</code> deixa o vídeo
+            mais rápido.
           </p>
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => setDelayOffset((d) => d - 100)}>
-              -100ms
+          <div className="flex gap-2 pt-1 flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0)}>
+              0s
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setDelayOffset(0)}>
-              Reset
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.1)}>
+              0.1s
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setDelayOffset((d) => d + 100)}>
-              +100ms
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.3)}>
+              0.3s
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.6)}>
+              0.6s
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(1)}>
+              1s
             </Button>
           </div>
         </div>
 
-        {characters.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="font-semibold">
-              Voice Mapping ({provider === "elevenlabs" ? "ElevenLabs" : "Minimax"})
-            </h2>
-            {characters.map((c) => (
-              <div key={c} className="grid grid-cols-3 items-center gap-2">
-                <Label className="col-span-1">{c}</Label>
-                <Input
-                  className="col-span-2"
-                  placeholder={
-                    provider === "elevenlabs" ? "ElevenLabs Voice ID" : "Minimax voice_id"
-                  }
-                  value={activeChat.voices[c] || ""}
-                  onChange={(e) =>
-                    updateActiveChat({
-                      voices: { ...activeChat.voices, [c]: e.target.value },
-                    })
-                  }
-                />
-              </div>
-            ))}
-            <Button
-              onClick={generateAudios}
-              disabled={generating}
-              className="w-full"
-              variant="secondary"
-            >
-              {generating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating {genProgress.done}/{genProgress.total}
-                </>
-              ) : (
-                "Generate Audios"
-              )}
-            </Button>
-          </div>
-        )}
+        {/* Generate audios — no manual voice mapping */}
+        <Button
+          onClick={generateAudios}
+          disabled={generating}
+          className="w-full"
+          variant="secondary"
+        >
+          {generating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Gerando {genProgress.done}/{genProgress.total}
+            </>
+          ) : (
+            "Gerar áudios (todos os chats)"
+          )}
+        </Button>
 
         {imageMessages.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
@@ -720,7 +812,7 @@ export default function ChatStoryGenerator() {
           size="lg"
         >
           <Play className="mr-2 h-4 w-4" />
-          Play Animation
+          Play vídeo (todos os chats)
         </Button>
       </div>
 
@@ -737,18 +829,18 @@ export default function ChatStoryGenerator() {
               <span className="text-sm">23</span>
             </div>
             <div className="flex flex-col items-center">
-              {activeChat.contactPhoto ? (
+              {displayChat.contactPhoto ? (
                 <img
-                  src={activeChat.contactPhoto}
-                  alt={activeChat.contactName}
+                  src={displayChat.contactPhoto}
+                  alt={displayChat.contactName}
                   className="w-9 h-9 rounded-full object-cover"
                 />
               ) : (
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-sm font-medium">
-                  {activeChat.contactName.charAt(0).toUpperCase()}
+                  {displayChat.contactName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <span className="text-white text-[10px] mt-0.5">{activeChat.contactName}</span>
+              <span className="text-white text-[10px] mt-0.5">{displayChat.contactName}</span>
             </div>
             <Video className="h-5 w-5 text-[#0A84FF]" />
           </div>
@@ -760,7 +852,7 @@ export default function ChatStoryGenerator() {
             style={{ scrollbarWidth: "none" }}
           >
             <AnimatePresence>
-              {(playing ? visibleMessages : activeChat.messages).map((m) => (
+              {(playing ? visibleMessages : displayChat.messages).map((m) => (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: 0, y: 20 }}
