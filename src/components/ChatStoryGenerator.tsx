@@ -91,8 +91,8 @@ export default function ChatStoryGenerator() {
   // pause between messages, in SECONDS (e.g. 0.1, 0.3, 1)
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
 
-  // cache: voice name (lowercased) -> voiceId, fetched from ElevenLabs
-  const [elevenVoices, setElevenVoices] = useState<Record<string, string>>({});
+  // manual mapping: character name (lowercased) -> voice ID
+  const [voiceMap, setVoiceMap] = useState<Record<string, string>>({});
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -206,20 +206,19 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  // ---- ElevenLabs voice library lookup by name ----
-  const fetchElevenVoices = async (): Promise<Record<string, string>> => {
-    if (Object.keys(elevenVoices).length > 0) return elevenVoices;
-    const res = await fetch("https://api.elevenlabs.io/v2/voices", {
-      headers: { "xi-api-key": elevenKey },
-    });
-    if (!res.ok) throw new Error("Falha ao buscar vozes do ElevenLabs: " + (await res.text()));
-    const json = await res.json();
-    const map: Record<string, string> = {};
-    for (const v of json.voices || []) {
-      if (v.name && v.voice_id) map[v.name.toLowerCase().trim()] = v.voice_id;
+  // Unique character names across all chats
+  const uniqueCharacters = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of chats) {
+      for (const m of c.messages) {
+        if (m.type === "text" && m.character) set.add(m.character.trim());
+      }
     }
-    setElevenVoices(map);
-    return map;
+    return Array.from(set);
+  }, [chats]);
+
+  const setVoiceFor = (name: string, id: string) => {
+    setVoiceMap((p) => ({ ...p, [name.toLowerCase().trim()]: id.trim() }));
   };
 
   // ---- TTS providers ----
@@ -292,17 +291,6 @@ export default function ChatStoryGenerator() {
       return;
     }
 
-    // Pre-fetch voice library for elevenlabs
-    let voiceMap: Record<string, string> = {};
-    if (provider === "elevenlabs") {
-      try {
-        voiceMap = await fetchElevenVoices();
-      } catch (e) {
-        alert((e as Error).message);
-        return;
-      }
-    }
-
     const allTexts = chats.flatMap((c) =>
       c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
     );
@@ -321,17 +309,11 @@ export default function ChatStoryGenerator() {
 
     for (const { chatId, msg } of allTexts) {
       try {
-        let voiceId = "";
-        if (provider === "elevenlabs") {
-          voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
-          if (!voiceId) {
-            throw new Error(
-              `Voz "${msg.character}" não encontrada na sua biblioteca do ElevenLabs. Adicione essa voz na biblioteca ou use o nome exato.`
-            );
-          }
-        } else {
-          // Minimax: use the character name directly as voice_id
-          voiceId = msg.character;
+        const voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
+        if (!voiceId) {
+          throw new Error(
+            `Sem voice ID para o personagem "${msg.character}". Preencha o ID na seção "Voice Mapping".`
+          );
         }
 
         const audioUrl =
@@ -432,15 +414,11 @@ export default function ChatStoryGenerator() {
             <Input
               type="password"
               value={elevenKey}
-              onChange={(e) => {
-                setElevenKey(e.target.value);
-                setElevenVoices({});
-              }}
+              onChange={(e) => setElevenKey(e.target.value)}
               placeholder="sk_..."
             />
             <p className="text-xs text-muted-foreground">
-              O nome em <code>nome&gt;</code> deve corresponder a uma voz da sua biblioteca
-              ElevenLabs.
+              Informe um Voice ID por personagem na seção "Voice Mapping".
             </p>
           </div>
           <div className="space-y-2">
@@ -671,7 +649,28 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
-        {/* Generate audios — no manual voice mapping */}
+        {/* Voice mapping — manual voice IDs per character */}
+        {uniqueCharacters.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold">Voice Mapping</h2>
+            <p className="text-xs text-muted-foreground">
+              Cole o Voice ID ({provider === "elevenlabs" ? "ElevenLabs" : "Minimax"}) para cada
+              personagem encontrado nos scripts.
+            </p>
+            {uniqueCharacters.map((name) => (
+              <div key={name} className="grid grid-cols-3 gap-2 items-center">
+                <Label className="col-span-1 truncate">{name}</Label>
+                <Input
+                  className="col-span-2"
+                  placeholder="Voice ID"
+                  value={voiceMap[name.toLowerCase().trim()] || ""}
+                  onChange={(e) => setVoiceFor(name, e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         <Button
           onClick={generateAudios}
           disabled={generating}
