@@ -346,13 +346,16 @@ export default function ChatStoryGenerator() {
       if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     };
 
-    for (const chat of chats) {
+    for (let c = 0; c < chats.length; c++) {
+      const chat = chats[c];
       // switch the displayed chat (header switches too)
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
-      // small breath between chat transitions
-      await new Promise((r) => setTimeout(r, 400));
+      // pause between chat transitions respects user setting
+      if (c > 0 && pauseMs > 0) {
+        await new Promise((r) => setTimeout(r, pauseMs));
+      }
 
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
@@ -365,9 +368,8 @@ export default function ChatStoryGenerator() {
           const audio = new Audio(msg.audioUrl);
           audio.play();
           await new Promise((r) => (audio.onended = () => r(null)));
-        } else {
-          await new Promise((r) => setTimeout(r, Math.max(800, pauseMs * 3)));
         }
+        // single, literal pause between messages — no hidden minimums
         if (i < chat.messages.length - 1 && pauseMs > 0) {
           await new Promise((r) => setTimeout(r, pauseMs));
         }
