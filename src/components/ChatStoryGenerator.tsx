@@ -169,15 +169,26 @@ export default function ChatStoryGenerator() {
     setPlaying(true);
     setVisibleMessages([]);
     const queue: Msg[] = [];
-    // base pauses; offset can shorten or extend them, clamped to >= 0
+    // base pauses; offset shifts ALL pauses (including between messages)
     const basePauseAfterAudio = 300;
     const baseImagePause = 1200;
+    const baseBetweenMessages = 250;
     const pauseAfterAudio = Math.max(0, basePauseAfterAudio + delayOffset);
     const imagePause = Math.max(0, baseImagePause + delayOffset);
+    const betweenMessages = Math.max(0, baseBetweenMessages + delayOffset);
 
-    for (const msg of messages) {
+    const scrollDown = () => {
+      const el = chatScrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    };
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
       queue.push(msg);
       setVisibleMessages([...queue]);
+      // wait a frame so DOM updates, then auto-scroll to bottom
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      scrollDown();
       if (msg.type === "text" && msg.audioUrl) {
         const audio = new Audio(msg.audioUrl);
         audio.play();
@@ -185,6 +196,9 @@ export default function ChatStoryGenerator() {
         if (pauseAfterAudio > 0) await new Promise((r) => setTimeout(r, pauseAfterAudio));
       } else {
         await new Promise((r) => setTimeout(r, imagePause));
+      }
+      if (i < messages.length - 1 && betweenMessages > 0) {
+        await new Promise((r) => setTimeout(r, betweenMessages));
       }
     }
     setPlaying(false);
