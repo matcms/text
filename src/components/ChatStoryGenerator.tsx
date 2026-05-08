@@ -420,7 +420,6 @@ export default function ChatStoryGenerator() {
             <p className="text-xs text-muted-foreground">
               Informe um Voice ID por personagem na seção "Voice Mapping".
             </p>
-            </p>
           </div>
           <div className="space-y-2">
             <Label>Minimax API Key</Label>
