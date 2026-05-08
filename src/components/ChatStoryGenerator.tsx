@@ -308,22 +308,45 @@ export default function ChatStoryGenerator() {
               <ImageIcon className="h-4 w-4" /> Images
             </h2>
             <p className="text-xs text-muted-foreground">
-              Provide an image for each <code>img:</code> entry — paste a URL or upload a file.
+              Cole uma imagem (Ctrl/Cmd+V) dentro do campo, ou cole uma URL, ou envie um arquivo.
             </p>
             {imageMessages.map((m) => (
-              <div key={m.id} className="space-y-2 rounded-md border p-3">
+              <div
+                key={m.id}
+                className="space-y-2 rounded-md border p-3"
+                tabIndex={0}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (const it of Array.from(items)) {
+                    if (it.type.startsWith("image/")) {
+                      const file = it.getAsFile();
+                      if (file) {
+                        e.preventDefault();
+                        onUploadImage(m.id, file);
+                        return;
+                      }
+                    }
+                  }
+                  const text = e.clipboardData?.getData("text");
+                  if (text && /^https?:\/\//i.test(text.trim())) {
+                    e.preventDefault();
+                    setImageUrlFor(m.id, text.trim());
+                  }
+                }}
+              >
                 <div className="text-xs text-muted-foreground">
                   Side {m.side} — “{m.text}”
                 </div>
                 <div className="flex gap-2 items-center">
                   <Link2 className="h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="https://image-url..."
+                    placeholder="Cole URL ou imagem aqui (Ctrl/Cmd+V)"
                     value={m.imageUrl?.startsWith("blob:") ? "" : m.imageUrl ?? ""}
                     onChange={(e) => setImageUrlFor(m.id, e.target.value || null)}
                   />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     ref={(el) => {
                       fileInputRefs.current[m.id] = el;
@@ -343,6 +366,33 @@ export default function ChatStoryGenerator() {
                     onClick={() => fileInputRefs.current[m.id]?.click()}
                   >
                     <Upload className="mr-2 h-3 w-3" /> Upload
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const items = await navigator.clipboard.read();
+                        for (const it of items) {
+                          const imgType = it.types.find((t) => t.startsWith("image/"));
+                          if (imgType) {
+                            const blob = await it.getType(imgType);
+                            const file = new File([blob], "pasted.png", { type: imgType });
+                            onUploadImage(m.id, file);
+                            return;
+                          }
+                        }
+                        const text = await navigator.clipboard.readText();
+                        if (text && /^https?:\/\//i.test(text.trim())) {
+                          setImageUrlFor(m.id, text.trim());
+                        }
+                      } catch (err) {
+                        alert("Não foi possível ler o clipboard. Use Ctrl/Cmd+V dentro do campo.");
+                      }
+                    }}
+                  >
+                    <ClipboardPaste className="mr-2 h-3 w-3" /> Colar
                   </Button>
                   {m.imageUrl && (
                     <>
