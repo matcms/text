@@ -206,20 +206,19 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  // ---- ElevenLabs voice library lookup by name ----
-  const fetchElevenVoices = async (): Promise<Record<string, string>> => {
-    if (Object.keys(elevenVoices).length > 0) return elevenVoices;
-    const res = await fetch("https://api.elevenlabs.io/v2/voices", {
-      headers: { "xi-api-key": elevenKey },
-    });
-    if (!res.ok) throw new Error("Falha ao buscar vozes do ElevenLabs: " + (await res.text()));
-    const json = await res.json();
-    const map: Record<string, string> = {};
-    for (const v of json.voices || []) {
-      if (v.name && v.voice_id) map[v.name.toLowerCase().trim()] = v.voice_id;
+  // Unique character names across all chats
+  const uniqueCharacters = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of chats) {
+      for (const m of c.messages) {
+        if (m.type === "text" && m.character) set.add(m.character.trim());
+      }
     }
-    setElevenVoices(map);
-    return map;
+    return Array.from(set);
+  }, [chats]);
+
+  const setVoiceFor = (name: string, id: string) => {
+    setVoiceMap((p) => ({ ...p, [name.toLowerCase().trim()]: id.trim() }));
   };
 
   // ---- TTS providers ----
