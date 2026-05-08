@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Video, Image as ImageIcon, Loader2, Play, Upload, Link2 } from "lucide-react";
+import { ChevronLeft, Video, Image as ImageIcon, Loader2, Play, Upload, Link2, ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,6 +42,7 @@ export default function ChatStoryGenerator() {
   // delay offset in ms: negative = faster, positive = slower. Applied to both audio + image pauses.
   const [delayOffset, setDelayOffset] = useState(0);
   const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const k = localStorage.getItem("elevenlabs_api_key");
@@ -168,15 +169,26 @@ export default function ChatStoryGenerator() {
     setPlaying(true);
     setVisibleMessages([]);
     const queue: Msg[] = [];
-    // base pauses; offset can shorten or extend them, clamped to >= 0
+    // base pauses; offset shifts ALL pauses (including between messages)
     const basePauseAfterAudio = 300;
     const baseImagePause = 1200;
+    const baseBetweenMessages = 250;
     const pauseAfterAudio = Math.max(0, basePauseAfterAudio + delayOffset);
     const imagePause = Math.max(0, baseImagePause + delayOffset);
+    const betweenMessages = Math.max(0, baseBetweenMessages + delayOffset);
 
-    for (const msg of messages) {
+    const scrollDown = () => {
+      const el = chatScrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    };
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
       queue.push(msg);
       setVisibleMessages([...queue]);
+      // wait a frame so DOM updates, then auto-scroll to bottom
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      scrollDown();
       if (msg.type === "text" && msg.audioUrl) {
         const audio = new Audio(msg.audioUrl);
         audio.play();
@@ -184,6 +196,9 @@ export default function ChatStoryGenerator() {
         if (pauseAfterAudio > 0) await new Promise((r) => setTimeout(r, pauseAfterAudio));
       } else {
         await new Promise((r) => setTimeout(r, imagePause));
+      }
+      if (i < messages.length - 1 && betweenMessages > 0) {
+        await new Promise((r) => setTimeout(r, betweenMessages));
       }
     }
     setPlaying(false);
@@ -293,22 +308,45 @@ export default function ChatStoryGenerator() {
               <ImageIcon className="h-4 w-4" /> Images
             </h2>
             <p className="text-xs text-muted-foreground">
-              Provide an image for each <code>img:</code> entry — paste a URL or upload a file.
+              Cole uma imagem (Ctrl/Cmd+V) dentro do campo, ou cole uma URL, ou envie um arquivo.
             </p>
             {imageMessages.map((m) => (
-              <div key={m.id} className="space-y-2 rounded-md border p-3">
+              <div
+                key={m.id}
+                className="space-y-2 rounded-md border p-3"
+                tabIndex={0}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (const it of Array.from(items)) {
+                    if (it.type.startsWith("image/")) {
+                      const file = it.getAsFile();
+                      if (file) {
+                        e.preventDefault();
+                        onUploadImage(m.id, file);
+                        return;
+                      }
+                    }
+                  }
+                  const text = e.clipboardData?.getData("text");
+                  if (text && /^https?:\/\//i.test(text.trim())) {
+                    e.preventDefault();
+                    setImageUrlFor(m.id, text.trim());
+                  }
+                }}
+              >
                 <div className="text-xs text-muted-foreground">
                   Side {m.side} — “{m.text}”
                 </div>
                 <div className="flex gap-2 items-center">
                   <Link2 className="h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="https://image-url..."
+                    placeholder="Cole URL ou imagem aqui (Ctrl/Cmd+V)"
                     value={m.imageUrl?.startsWith("blob:") ? "" : m.imageUrl ?? ""}
                     onChange={(e) => setImageUrlFor(m.id, e.target.value || null)}
                   />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     ref={(el) => {
                       fileInputRefs.current[m.id] = el;
@@ -328,6 +366,33 @@ export default function ChatStoryGenerator() {
                     onClick={() => fileInputRefs.current[m.id]?.click()}
                   >
                     <Upload className="mr-2 h-3 w-3" /> Upload
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const items = await navigator.clipboard.read();
+                        for (const it of items) {
+                          const imgType = it.types.find((t) => t.startsWith("image/"));
+                          if (imgType) {
+                            const blob = await it.getType(imgType);
+                            const file = new File([blob], "pasted.png", { type: imgType });
+                            onUploadImage(m.id, file);
+                            return;
+                          }
+                        }
+                        const text = await navigator.clipboard.readText();
+                        if (text && /^https?:\/\//i.test(text.trim())) {
+                          setImageUrlFor(m.id, text.trim());
+                        }
+                      } catch (err) {
+                        alert("Não foi possível ler o clipboard. Use Ctrl/Cmd+V dentro do campo.");
+                      }
+                    }}
+                  >
+                    <ClipboardPaste className="mr-2 h-3 w-3" /> Colar
                   </Button>
                   {m.imageUrl && (
                     <>
@@ -386,7 +451,8 @@ export default function ChatStoryGenerator() {
 
           {/* Chat */}
           <div
-            className="flex-1 bg-black p-4 overflow-y-auto"
+            ref={chatScrollRef}
+            className="flex-1 bg-black p-4 overflow-y-auto scroll-smooth"
             style={{ scrollbarWidth: "none" }}
           >
             <style>{`.chat-scroll::-webkit-scrollbar{display:none}`}</style>
