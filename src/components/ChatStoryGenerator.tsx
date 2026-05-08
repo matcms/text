@@ -451,7 +451,8 @@ export default function ChatStoryGenerator() {
 
           {/* Chat */}
           <div
-            className="flex-1 bg-black p-4 overflow-y-auto"
+            ref={chatScrollRef}
+            className="flex-1 bg-black p-4 overflow-y-auto scroll-smooth"
             style={{ scrollbarWidth: "none" }}
           >
             <style>{`.chat-scroll::-webkit-scrollbar{display:none}`}</style>
