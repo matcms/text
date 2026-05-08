@@ -291,17 +291,6 @@ export default function ChatStoryGenerator() {
       return;
     }
 
-    // Pre-fetch voice library for elevenlabs
-    let voiceMap: Record<string, string> = {};
-    if (provider === "elevenlabs") {
-      try {
-        voiceMap = await fetchElevenVoices();
-      } catch (e) {
-        alert((e as Error).message);
-        return;
-      }
-    }
-
     const allTexts = chats.flatMap((c) =>
       c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
     );
@@ -320,17 +309,11 @@ export default function ChatStoryGenerator() {
 
     for (const { chatId, msg } of allTexts) {
       try {
-        let voiceId = "";
-        if (provider === "elevenlabs") {
-          voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
-          if (!voiceId) {
-            throw new Error(
-              `Voz "${msg.character}" não encontrada na sua biblioteca do ElevenLabs. Adicione essa voz na biblioteca ou use o nome exato.`
-            );
-          }
-        } else {
-          // Minimax: use the character name directly as voice_id
-          voiceId = msg.character;
+        const voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
+        if (!voiceId) {
+          throw new Error(
+            `Sem voice ID para o personagem "${msg.character}". Preencha o ID na seção "Voice Mapping".`
+          );
         }
 
         const audioUrl =
