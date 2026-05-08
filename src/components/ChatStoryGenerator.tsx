@@ -42,6 +42,7 @@ export default function ChatStoryGenerator() {
   // delay offset in ms: negative = faster, positive = slower. Applied to both audio + image pauses.
   const [delayOffset, setDelayOffset] = useState(0);
   const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const k = localStorage.getItem("elevenlabs_api_key");
