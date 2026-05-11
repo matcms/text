@@ -104,6 +104,12 @@ export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
   const [minimaxKey, setMinimaxKey] = useState("");
   const [minimaxGroupId, setMinimaxGroupId] = useState("");
+  const [googleKey, setGoogleKey] = useState("");
+  const [provider, setProvider] = useState<Provider>("elevenlabs");
+  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  // typing indicator duration before each side-2 message (seconds)
+  const [typingSec, setTypingSec] = useState(0.9);
+  const [typingActive, setTypingActive] = useState(false);
   const [provider, setProvider] = useState<Provider>("elevenlabs");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
 
