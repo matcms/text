@@ -1001,6 +1001,21 @@ export default function ChatStoryGenerator() {
                   )}
                 </motion.div>
               ))}
+              {typingActive && (
+                <motion.div
+                  key="typing-indicator"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex mb-1 justify-end"
+                >
+                  <div className="bg-[#0A84FF] rounded-2xl rounded-br-sm px-3 py-2 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" />
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </div>
