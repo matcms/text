@@ -318,6 +318,29 @@ export default function ChatStoryGenerator() {
     return hexToBlobUrl(hex);
   };
 
+  const ttsGoogle = async (text: string, voiceName: string): Promise<string> => {
+    // voiceName = a Google AI Studio prebuilt voice (e.g. "Kore", "Puck", "Zephyr")
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(googleKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || "Kore" } },
+          },
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const json = await res.json();
+    const b64 = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!b64) throw new Error("Google: missing audio in response");
+    return pcmToWavUrl(b64, 24000, 1);
+  };
+
   const generateAudios = async () => {
     if (provider === "elevenlabs" && !elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
