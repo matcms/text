@@ -749,6 +749,25 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
+        {/* Typing indicator duration */}
+        <div className="space-y-2 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <Label>"Digitando..." antes da mensagem (lado direito)</Label>
+            <span className="text-xs text-muted-foreground">{typingSec.toFixed(2)}s</span>
+          </div>
+          <Input
+            type="number"
+            step={0.1}
+            min={0}
+            value={typingSec}
+            onChange={(e) => setTypingSec(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="0.9"
+          />
+          <p className="text-xs text-muted-foreground">
+            Mostra os "..." antes de cada mensagem do contato (lado direito) e some quando o áudio começa. 0 = desativado.
+          </p>
+        </div>
+
         {/* Voice mapping — manual voice IDs per character */}
         {uniqueCharacters.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
