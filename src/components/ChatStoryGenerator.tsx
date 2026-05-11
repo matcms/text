@@ -519,8 +519,21 @@ export default function ChatStoryGenerator() {
             />
           </div>
           <div className="space-y-2">
+            <Label>Google AI Studio API Key</Label>
+            <Input
+              type="password"
+              value={googleKey}
+              onChange={(e) => setGoogleKey(e.target.value)}
+              placeholder="AIza..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Use o nome da voz prebuilt como Voice ID (ex.: <code>Kore</code>, <code>Puck</code>,{" "}
+              <code>Zephyr</code>, <code>Charon</code>).
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>TTS Provider</Label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant={provider === "elevenlabs" ? "default" : "outline"}
@@ -534,6 +547,13 @@ export default function ChatStoryGenerator() {
                 onClick={() => setProvider("minimax")}
               >
                 Minimax
+              </Button>
+              <Button
+                size="sm"
+                variant={provider === "google" ? "default" : "outline"}
+                onClick={() => setProvider("google")}
+              >
+                Google AI Studio
               </Button>
             </div>
           </div>
