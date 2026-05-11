@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronLeft,
   Video,
+  Phone,
   Image as ImageIcon,
   Loader2,
   Play,
@@ -22,7 +23,7 @@ type TextMsg = {
   id: number;
   side: string;
   type: "text";
-  character: string;
+  voiceName: string;
   text: string;
   audioUrl: string | null;
 };
@@ -44,9 +45,10 @@ type Chat = {
   messages: Msg[];
 };
 
-type Provider = "elevenlabs" | "minimax" | "google";
+type Provider = "elevenlabs" | "google-cloud";
+type ChatTheme = "imessage" | "whatsapp";
 
-const DEFAULT_SCRIPT = `- iMessage: Nate
+const DEFAULT_SCRIPT = `- Header: Nate
 1: Adam> Dude, we're seriously screwed.
 1: Adam> Cancel the Christmas turkey.
 1: img: police cruiser on the street
@@ -61,53 +63,20 @@ const newChat = (i: number): Chat => ({
   messages: [],
 });
 
-// Convert minimax hex string to a Blob URL
-const hexToBlobUrl = (hex: string, mime = "audio/mpeg") => {
-  const clean = hex.replace(/\s+/g, "");
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return URL.createObjectURL(new Blob([bytes], { type: mime }));
-};
-
-// Wrap raw PCM (signed 16-bit LE) into a WAV blob URL
-const pcmToWavUrl = (b64: string, sampleRate = 24000, channels = 1) => {
+// Convert base64 (mp3) to blob URL
+const base64ToBlobUrl = (b64: string, mime = "audio/mpeg") => {
   const bin = atob(b64);
-  const pcm = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
-  const dataSize = pcm.length;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-  const writeStr = (off: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
-  };
-  const byteRate = sampleRate * channels * 2;
-  writeStr(0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  writeStr(8, "WAVE");
-  writeStr(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, channels * 2, true);
-  view.setUint16(34, 16, true);
-  writeStr(36, "data");
-  view.setUint32(40, dataSize, true);
-  new Uint8Array(buffer, 44).set(pcm);
-  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: mime }));
 };
 
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
-  const [minimaxKey, setMinimaxKey] = useState("");
-  const [minimaxGroupId, setMinimaxGroupId] = useState("");
-  const [googleKey, setGoogleKey] = useState("");
+  const [googleCloudKey, setGoogleCloudKey] = useState("");
   const [provider, setProvider] = useState<Provider>("elevenlabs");
+  const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
-  // typing indicator duration before each side-2 message (seconds)
   const [typingSec, setTypingSec] = useState(0.9);
   const [typingActive, setTypingActive] = useState(false);
 
@@ -121,11 +90,10 @@ export default function ChatStoryGenerator() {
   const [playing, setPlaying] = useState(false);
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
 
-  // pause between messages, in SECONDS (e.g. 0.1, 0.3, 1)
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
 
-  // manual mapping: character name (lowercased) -> voice ID
-  const [voiceMap, setVoiceMap] = useState<Record<string, string>>({});
+  // ElevenLabs voices cache (name -> voice_id)
+  const elevenVoicesRef = useRef<Record<string, string> | null>(null);
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -134,22 +102,22 @@ export default function ChatStoryGenerator() {
   // Persist keys
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
-    setMinimaxKey(localStorage.getItem("minimax_api_key") || "");
-    setMinimaxGroupId(localStorage.getItem("minimax_group_id") || "");
-    setGoogleKey(localStorage.getItem("google_ai_api_key") || "");
+    setGoogleCloudKey(localStorage.getItem("google_cloud_tts_key") || "");
+    setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
+    setProvider((localStorage.getItem("tts_provider") as Provider) || "elevenlabs");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
   }, [elevenKey]);
   useEffect(() => {
-    localStorage.setItem("minimax_api_key", minimaxKey);
-  }, [minimaxKey]);
+    localStorage.setItem("google_cloud_tts_key", googleCloudKey);
+  }, [googleCloudKey]);
   useEffect(() => {
-    localStorage.setItem("google_ai_api_key", googleKey);
-  }, [googleKey]);
+    localStorage.setItem("chat_theme", chatTheme);
+  }, [chatTheme]);
   useEffect(() => {
-    localStorage.setItem("minimax_group_id", minimaxGroupId);
-  }, [minimaxGroupId]);
+    localStorage.setItem("tts_provider", provider);
+  }, [provider]);
 
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
@@ -175,8 +143,9 @@ export default function ChatStoryGenerator() {
     let id = 0;
     let header = activeChat.contactName;
     for (const line of lines) {
-      if (line.startsWith("- iMessage:")) {
-        header = line.replace("- iMessage:", "").trim();
+      const headerMatch = line.match(/^-\s*(?:Header|iMessage)\s*:\s*(.+)$/i);
+      if (headerMatch) {
+        header = headerMatch[1].trim();
         continue;
       }
       const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
@@ -196,7 +165,7 @@ export default function ChatStoryGenerator() {
           id: id++,
           side: textMatch[1],
           type: "text",
-          character: textMatch[2].trim(),
+          voiceName: textMatch[2].trim(),
           text: textMatch[3],
           audioUrl: null,
         });
@@ -243,23 +212,26 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  // Unique character names across all chats
-  const uniqueCharacters = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of chats) {
-      for (const m of c.messages) {
-        if (m.type === "text" && m.character) set.add(m.character.trim());
-      }
+  // ---- TTS providers ----
+  const fetchElevenVoices = async (): Promise<Record<string, string>> => {
+    if (elevenVoicesRef.current) return elevenVoicesRef.current;
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: { "xi-api-key": elevenKey },
+    });
+    if (!res.ok) throw new Error(`ElevenLabs voices: ${await res.text()}`);
+    const json = await res.json();
+    const map: Record<string, string> = {};
+    for (const v of json.voices || []) {
+      map[String(v.name).toLowerCase()] = v.voice_id;
+      map[String(v.voice_id).toLowerCase()] = v.voice_id;
     }
-    return Array.from(set);
-  }, [chats]);
-
-  const setVoiceFor = (name: string, id: string) => {
-    setVoiceMap((p) => ({ ...p, [name.toLowerCase().trim()]: id.trim() }));
+    elevenVoicesRef.current = map;
+    return map;
   };
 
-  // ---- TTS providers ----
-  const ttsElevenLabs = async (text: string, voiceId: string): Promise<string> => {
+  const ttsElevenLabs = async (text: string, voiceName: string): Promise<string> => {
+    const voices = await fetchElevenVoices();
+    const voiceId = voices[voiceName.toLowerCase()] || voiceName;
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {
@@ -283,62 +255,23 @@ export default function ChatStoryGenerator() {
     return URL.createObjectURL(blob);
   };
 
-  const ttsMinimax = async (text: string, voiceId: string): Promise<string> => {
-    const url = minimaxGroupId
-      ? `https://api.minimax.io/v1/t2a_v2?GroupId=${encodeURIComponent(minimaxGroupId)}`
-      : `https://api.minimax.io/v1/t2a_v2`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${minimaxKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "speech-02-hd",
-        text,
-        stream: false,
-        voice_setting: {
-          voice_id: voiceId,
-          speed: Math.min(2, Math.max(0.5, voiceSpeed)),
-          vol: 1,
-          pitch: 0,
-        },
-        audio_setting: {
-          sample_rate: 32000,
-          bitrate: 128000,
-          format: "mp3",
-          channel: 1,
-        },
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const json = await res.json();
-    const hex = json?.data?.audio;
-    if (!hex) throw new Error("Minimax: missing audio in response");
-    return hexToBlobUrl(hex);
-  };
-
-  const ttsGoogle = async (text: string, voiceName: string): Promise<string> => {
-    // voiceName = a Google AI Studio prebuilt voice (e.g. "Kore", "Puck", "Zephyr")
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(googleKey)}`;
+  const ttsGoogleCloud = async (text: string, voiceName: string): Promise<string> => {
+    const langCode = voiceName.split("-").slice(0, 2).join("-");
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(googleCloudKey)}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text }] }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || "Kore" } },
-          },
-        },
+        input: { text },
+        voice: { languageCode: langCode, name: voiceName },
+        audioConfig: { audioEncoding: "MP3", speakingRate: voiceSpeed },
       }),
     });
     if (!res.ok) throw new Error(await res.text());
     const json = await res.json();
-    const b64 = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!b64) throw new Error("Google: missing audio in response");
-    return pcmToWavUrl(b64, 24000, 1);
+    const b64 = json?.audioContent;
+    if (!b64) throw new Error("Google Cloud TTS: missing audioContent");
+    return base64ToBlobUrl(b64, "audio/mpeg");
   };
 
   const generateAudios = async () => {
@@ -346,14 +279,12 @@ export default function ChatStoryGenerator() {
       alert("Por favor, insira sua API key do ElevenLabs");
       return;
     }
-    if (provider === "minimax" && !minimaxKey) {
-      alert("Por favor, insira sua API key do Minimax");
+    if (provider === "google-cloud" && !googleCloudKey) {
+      alert("Por favor, insira sua API key do Google Cloud TTS");
       return;
     }
-    if (provider === "google" && !googleKey) {
-      alert("Por favor, insira sua API key do Google AI Studio");
-      return;
-    }
+
+    elevenVoicesRef.current = null; // force refresh
 
     const allTexts = chats.flatMap((c) =>
       c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
@@ -367,25 +298,15 @@ export default function ChatStoryGenerator() {
     setGenProgress({ done: 0, total: allTexts.length });
 
     let done = 0;
-    // build a working snapshot per chat
     const chatMessagesMap: Record<string, Msg[]> = {};
     chats.forEach((c) => (chatMessagesMap[c.id] = [...c.messages]));
 
     for (const { chatId, msg } of allTexts) {
       try {
-        const voiceId = voiceMap[msg.character.toLowerCase().trim()] || "";
-        if (!voiceId) {
-          throw new Error(
-            `Sem voice ID para o personagem "${msg.character}". Preencha o ID na seção "Voice Mapping".`
-          );
-        }
-
         const audioUrl =
           provider === "elevenlabs"
-            ? await ttsElevenLabs(msg.text, voiceId)
-            : provider === "minimax"
-              ? await ttsMinimax(msg.text, voiceId)
-              : await ttsGoogle(msg.text, voiceId);
+            ? await ttsElevenLabs(msg.text, msg.voiceName)
+            : await ttsGoogleCloud(msg.text, msg.voiceName);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
@@ -393,7 +314,7 @@ export default function ChatStoryGenerator() {
         updateChatById(chatId, { messages: [...arr] });
       } catch (e) {
         console.error(e);
-        alert(`Falha ao gerar áudio para: ${msg.text}\n${(e as Error).message}`);
+        alert(`Falha ao gerar áudio para "${msg.voiceName}": ${msg.text}\n${(e as Error).message}`);
         setGenerating(false);
         return;
       }
@@ -414,11 +335,9 @@ export default function ChatStoryGenerator() {
 
     for (let c = 0; c < chats.length; c++) {
       const chat = chats[c];
-      // switch the displayed chat (header switches too)
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
-      // pause between chat transitions respects user setting
       if (c > 0 && pauseMs > 0) {
         await new Promise((r) => setTimeout(r, pauseMs));
       }
@@ -427,7 +346,6 @@ export default function ChatStoryGenerator() {
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
 
-        // Typing indicator for the right side (side "2") before message appears
         const typingMs = Math.max(0, Math.round(typingSec * 1000));
         if (msg.side === "2" && typingMs > 0) {
           setTypingActive(true);
@@ -446,7 +364,6 @@ export default function ChatStoryGenerator() {
           audio.play();
           await new Promise((r) => (audio.onended = () => r(null)));
         }
-        // single, literal pause between messages — no hidden minimums
         if (i < chat.messages.length - 1 && pauseMs > 0) {
           await new Promise((r) => setTimeout(r, pauseMs));
         }
@@ -471,10 +388,11 @@ export default function ChatStoryGenerator() {
     if (id === activeChatId) setActiveChatId(remaining[0].id);
   };
 
-  // The chat to display in the right column
   const displayChat = playingChatId
     ? chats.find((c) => c.id === playingChatId) || activeChat
     : activeChat;
+
+  const isWA = chatTheme === "whatsapp";
 
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
@@ -483,54 +401,32 @@ export default function ChatStoryGenerator() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Chat Story Generator</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Cole um script, gere as vozes via API e reproduza um vídeo iMessage sincronizado.
+            Cole um script com <code>1: NomeDaVoz&gt; texto</code>, gere os áudios e reproduza um vídeo sincronizado.
           </p>
         </div>
 
-        {/* API keys + provider */}
-        <div className="space-y-3 rounded-lg border p-4">
+        {/* Theme + Provider */}
+        <div className="space-y-4 rounded-lg border p-4">
           <div className="space-y-2">
-            <Label>ElevenLabs API Key</Label>
-            <Input
-              type="password"
-              value={elevenKey}
-              onChange={(e) => setElevenKey(e.target.value)}
-              placeholder="sk_..."
-            />
-            <p className="text-xs text-muted-foreground">
-              Informe um Voice ID por personagem na seção "Voice Mapping".
-            </p>
+            <Label>Chat Theme</Label>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant={chatTheme === "imessage" ? "default" : "outline"}
+                onClick={() => setChatTheme("imessage")}
+              >
+                iMessage
+              </Button>
+              <Button
+                size="sm"
+                variant={chatTheme === "whatsapp" ? "default" : "outline"}
+                onClick={() => setChatTheme("whatsapp")}
+              >
+                WhatsApp (Dark)
+              </Button>
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label>Minimax API Key</Label>
-            <Input
-              type="password"
-              value={minimaxKey}
-              onChange={(e) => setMinimaxKey(e.target.value)}
-              placeholder="eyJh..."
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Minimax Group ID (opcional)</Label>
-            <Input
-              value={minimaxGroupId}
-              onChange={(e) => setMinimaxGroupId(e.target.value)}
-              placeholder="1234567890"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Google AI Studio API Key</Label>
-            <Input
-              type="password"
-              value={googleKey}
-              onChange={(e) => setGoogleKey(e.target.value)}
-              placeholder="AIza..."
-            />
-            <p className="text-xs text-muted-foreground">
-              Use o nome da voz prebuilt como Voice ID (ex.: <code>Kore</code>, <code>Puck</code>,{" "}
-              <code>Zephyr</code>, <code>Charon</code>).
-            </p>
-          </div>
+
           <div className="space-y-2">
             <Label>TTS Provider</Label>
             <div className="flex gap-2 flex-wrap">
@@ -543,20 +439,40 @@ export default function ChatStoryGenerator() {
               </Button>
               <Button
                 size="sm"
-                variant={provider === "minimax" ? "default" : "outline"}
-                onClick={() => setProvider("minimax")}
+                variant={provider === "google-cloud" ? "default" : "outline"}
+                onClick={() => setProvider("google-cloud")}
               >
-                Minimax
-              </Button>
-              <Button
-                size="sm"
-                variant={provider === "google" ? "default" : "outline"}
-                onClick={() => setProvider("google")}
-              >
-                Google AI Studio
+                Google Cloud TTS
               </Button>
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label>ElevenLabs API Key</Label>
+            <Input
+              type="password"
+              value={elevenKey}
+              onChange={(e) => setElevenKey(e.target.value)}
+              placeholder="sk_..."
+            />
+            <p className="text-xs text-muted-foreground">
+              No script use o <strong>nome</strong> da voz da sua biblioteca (ex.: <code>Adam</code>).
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Google Cloud TTS API Key</Label>
+            <Input
+              type="password"
+              value={googleCloudKey}
+              onChange={(e) => setGoogleCloudKey(e.target.value)}
+              placeholder="AIza..."
+            />
+            <p className="text-xs text-muted-foreground">
+              No script use o nome exato da voz (ex.: <code>pt-BR-Neural2-B</code>).
+            </p>
+          </div>
+
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Voice Speed</Label>
@@ -570,9 +486,6 @@ export default function ChatStoryGenerator() {
               value={voiceSpeed}
               onChange={(e) => setVoiceSpeed(Number(e.target.value))}
             />
-            <p className="text-xs text-muted-foreground">
-              ElevenLabs aceita 0.7–1.2; Minimax 0.5–2.0.
-            </p>
           </div>
         </div>
 
@@ -655,7 +568,7 @@ export default function ChatStoryGenerator() {
             <User className="h-4 w-4" /> Contact photo (opcional)
           </Label>
           <p className="text-xs text-muted-foreground">
-            Cole uma imagem (Ctrl/Cmd+V), uma URL, ou envie um arquivo. Sem foto, mostramos a inicial.
+            Cole uma imagem (Ctrl/Cmd+V), uma URL, ou envie um arquivo.
           </p>
           <div className="flex items-center gap-3 flex-wrap">
             {activeChat.contactPhoto ? (
@@ -704,19 +617,20 @@ export default function ChatStoryGenerator() {
             value={activeChat.script}
             onChange={(e) => updateActiveChat({ script: e.target.value })}
           />
+          <p className="text-xs text-muted-foreground">
+            Formato: <code>- Header: nome</code> e linhas <code>1: NomeDaVoz&gt; texto</code>.
+          </p>
         </div>
 
         <Button onClick={parseScript} className="w-full">
           Parse Script
         </Button>
 
-        {/* Pause control (in seconds) */}
+        {/* Pause control */}
         <div className="space-y-2 rounded-lg border p-4">
           <div className="flex items-center justify-between">
             <Label>Pausa entre mensagens (segundos)</Label>
-            <span className="text-xs text-muted-foreground">
-              {messagePauseSec.toFixed(2)}s
-            </span>
+            <span className="text-xs text-muted-foreground">{messagePauseSec.toFixed(2)}s</span>
           </div>
           <Input
             type="number"
@@ -726,30 +640,16 @@ export default function ChatStoryGenerator() {
             onChange={(e) => setMessagePauseSec(Math.max(0, Number(e.target.value) || 0))}
             placeholder="0.3"
           />
-          <p className="text-xs text-muted-foreground">
-            Tempo de espera entre uma mensagem e a próxima. Ex.: <code>0.1</code> deixa o vídeo
-            mais rápido.
-          </p>
           <div className="flex gap-2 pt-1 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0)}>
-              0s
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.1)}>
-              0.1s
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.3)}>
-              0.3s
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.6)}>
-              0.6s
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(1)}>
-              1s
-            </Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0)}>0s</Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.1)}>0.1s</Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.3)}>0.3s</Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.6)}>0.6s</Button>
+            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(1)}>1s</Button>
           </div>
         </div>
 
-        {/* Typing indicator duration */}
+        {/* Typing indicator */}
         <div className="space-y-2 rounded-lg border p-4">
           <div className="flex items-center justify-between">
             <Label>"Digitando..." antes da mensagem (lado direito)</Label>
@@ -763,32 +663,7 @@ export default function ChatStoryGenerator() {
             onChange={(e) => setTypingSec(Math.max(0, Number(e.target.value) || 0))}
             placeholder="0.9"
           />
-          <p className="text-xs text-muted-foreground">
-            Mostra os "..." antes de cada mensagem do contato (lado direito) e some quando o áudio começa. 0 = desativado.
-          </p>
         </div>
-
-        {/* Voice mapping — manual voice IDs per character */}
-        {uniqueCharacters.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="font-semibold">Voice Mapping</h2>
-            <p className="text-xs text-muted-foreground">
-              Cole o Voice ID ({provider === "elevenlabs" ? "ElevenLabs" : "Minimax"}) para cada
-              personagem encontrado nos scripts.
-            </p>
-            {uniqueCharacters.map((name) => (
-              <div key={name} className="grid grid-cols-3 gap-2 items-center">
-                <Label className="col-span-1 truncate">{name}</Label>
-                <Input
-                  className="col-span-2"
-                  placeholder="Voice ID"
-                  value={voiceMap[name.toLowerCase().trim()] || ""}
-                  onChange={(e) => setVoiceFor(name, e.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
 
         <Button
           onClick={generateAudios}
@@ -811,9 +686,6 @@ export default function ChatStoryGenerator() {
             <h2 className="font-semibold flex items-center gap-2">
               <ImageIcon className="h-4 w-4" /> Images
             </h2>
-            <p className="text-xs text-muted-foreground">
-              Cole uma imagem (Ctrl/Cmd+V) dentro do campo, ou cole uma URL, ou envie um arquivo.
-            </p>
             {imageMessages.map((m) => (
               <div
                 key={m.id}
@@ -867,38 +739,9 @@ export default function ChatStoryGenerator() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()
-                    }
+                    onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
                   >
                     <Upload className="mr-2 h-3 w-3" /> Upload
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      try {
-                        const items = await navigator.clipboard.read();
-                        for (const it of items) {
-                          const imgType = it.types.find((t) => t.startsWith("image/"));
-                          if (imgType) {
-                            const blob = await it.getType(imgType);
-                            const file = new File([blob], "pasted.png", { type: imgType });
-                            onUploadImage(m.id, file);
-                            return;
-                          }
-                        }
-                        const text = await navigator.clipboard.readText();
-                        if (text && /^https?:\/\//i.test(text.trim())) {
-                          setImageUrlFor(m.id, text.trim());
-                        }
-                      } catch {
-                        alert("Não foi possível ler o clipboard. Use Ctrl/Cmd+V dentro do campo.");
-                      }
-                    }}
-                  >
-                    <ClipboardPaste className="mr-2 h-3 w-3" /> Colar
                   </Button>
                   {m.imageUrl && (
                     <>
@@ -935,18 +778,19 @@ export default function ChatStoryGenerator() {
       </div>
 
       {/* RIGHT */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center bg-purple-600 p-6 min-h-screen">
+      <div
+        className={`w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen ${
+          isWA ? "bg-emerald-900" : "bg-purple-600"
+        }`}
+      >
         <div
           className="relative bg-black rounded-[3rem] overflow-hidden shadow-2xl border-[10px] border-black flex flex-col"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
-          <div className="bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 flex items-center justify-between border-b border-white/5">
-            <div className="flex items-center gap-1 text-[#0A84FF]">
-              <ChevronLeft className="h-6 w-6" />
-              <span className="text-sm">23</span>
-            </div>
-            <div className="flex flex-col items-center">
+          {isWA ? (
+            <div className="bg-[#1f2c34] text-[#e9edef] flex items-center p-3 gap-3 shadow-sm z-10">
+              <ChevronLeft className="h-5 w-5 text-[#e9edef]" />
               {displayChat.contactPhoto ? (
                 <img
                   src={displayChat.contactPhoto}
@@ -958,15 +802,45 @@ export default function ChatStoryGenerator() {
                   {displayChat.contactName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <span className="text-white text-[10px] mt-0.5">{displayChat.contactName}</span>
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className="text-[15px] font-semibold truncate">
+                  {displayChat.contactName}
+                </span>
+                <span className="text-xs text-[#8696a0]">Online</span>
+              </div>
+              <Video className="h-5 w-5 text-[#00a884]" />
+              <Phone className="h-5 w-5 text-[#00a884]" />
             </div>
-            <Video className="h-5 w-5 text-[#0A84FF]" />
-          </div>
+          ) : (
+            <div className="bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 flex items-center justify-between border-b border-white/5">
+              <div className="flex items-center gap-1 text-[#0A84FF]">
+                <ChevronLeft className="h-6 w-6" />
+                <span className="text-sm">23</span>
+              </div>
+              <div className="flex flex-col items-center">
+                {displayChat.contactPhoto ? (
+                  <img
+                    src={displayChat.contactPhoto}
+                    alt={displayChat.contactName}
+                    className="w-9 h-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-sm font-medium">
+                    {displayChat.contactName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-white text-[10px] mt-0.5">{displayChat.contactName}</span>
+              </div>
+              <Video className="h-5 w-5 text-[#0A84FF]" />
+            </div>
+          )}
 
           {/* Chat */}
           <div
             ref={chatScrollRef}
-            className="flex-1 bg-black p-4 overflow-y-auto scroll-smooth"
+            className={`flex-1 p-4 overflow-y-auto scroll-smooth ${
+              isWA ? "bg-[#0b141a]" : "bg-black"
+            }`}
             style={{ scrollbarWidth: "none" }}
           >
             <AnimatePresence>
@@ -975,26 +849,56 @@ export default function ChatStoryGenerator() {
                   key={m.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex mb-1 ${m.side === "2" ? "justify-end" : "justify-start"}`}
+                  className={`flex ${isWA ? "mb-1.5" : "mb-1"} ${
+                    m.side === "2" ? "justify-end" : "justify-start"
+                  }`}
                 >
                   {m.type === "text" ? (
-                    <div
-                      className={`max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${
-                        m.side === "2"
-                          ? "bg-[#0A84FF] rounded-2xl rounded-br-sm"
-                          : "bg-[#262628] rounded-2xl rounded-bl-sm"
-                      }`}
-                    >
-                      {m.text}
-                    </div>
+                    isWA ? (
+                      <div
+                        className={`max-w-[80%] py-1.5 px-3 text-[#e9edef] text-[15px] leading-snug ${
+                          m.side === "2"
+                            ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto"
+                            : "bg-[#202c33] rounded-lg rounded-tl-none"
+                        }`}
+                      >
+                        {m.text}
+                      </div>
+                    ) : (
+                      <div
+                        className={`max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${
+                          m.side === "2"
+                            ? "bg-[#0A84FF] rounded-2xl rounded-br-sm"
+                            : "bg-[#262628] rounded-2xl rounded-bl-sm"
+                        }`}
+                      >
+                        {m.text}
+                      </div>
+                    )
                   ) : m.imageUrl ? (
-                    <img
-                      src={m.imageUrl}
-                      alt={m.text}
-                      className="max-w-[70%] max-h-56 object-cover rounded-2xl"
-                    />
+                    isWA ? (
+                      <div
+                        className={`p-1 rounded-lg ${
+                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#202c33]"
+                        }`}
+                      >
+                        <img
+                          src={m.imageUrl}
+                          alt={m.text}
+                          className="max-w-[240px] max-h-56 object-cover rounded-md"
+                        />
+                      </div>
+                    ) : (
+                      <img
+                        src={m.imageUrl}
+                        alt={m.text}
+                        className="max-w-[70%] max-h-56 object-cover rounded-2xl"
+                      />
+                    )
                   ) : (
-                    <div className="h-32 w-48 bg-zinc-800 rounded-2xl flex flex-col items-center justify-center text-zinc-300 text-xs gap-2 p-2">
+                    <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
+                      isWA ? "bg-[#202c33] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
+                    }`}>
                       <ImageIcon className="h-8 w-8" />
                       <span className="text-center">{m.text}</span>
                     </div>
@@ -1009,7 +913,13 @@ export default function ChatStoryGenerator() {
                   exit={{ opacity: 0 }}
                   className="flex mb-1 justify-end"
                 >
-                  <div className="bg-[#0A84FF] rounded-2xl rounded-br-sm px-3 py-2 flex items-center gap-1">
+                  <div
+                    className={`px-3 py-2 flex items-center gap-1 ${
+                      isWA
+                        ? "bg-[#005c4b] rounded-lg rounded-tr-none"
+                        : "bg-[#0A84FF] rounded-2xl rounded-br-sm"
+                    }`}
+                  >
                     <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.3s]" />
                     <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.15s]" />
                     <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" />
