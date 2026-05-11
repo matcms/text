@@ -44,7 +44,7 @@ type Chat = {
   messages: Msg[];
 };
 
-type Provider = "elevenlabs" | "minimax";
+type Provider = "elevenlabs" | "minimax" | "google";
 
 const DEFAULT_SCRIPT = `- iMessage: Nate
 1: Adam> Dude, we're seriously screwed.
@@ -71,12 +71,45 @@ const hexToBlobUrl = (hex: string, mime = "audio/mpeg") => {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 };
 
+// Wrap raw PCM (signed 16-bit LE) into a WAV blob URL
+const pcmToWavUrl = (b64: string, sampleRate = 24000, channels = 1) => {
+  const bin = atob(b64);
+  const pcm = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
+  const dataSize = pcm.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  const byteRate = sampleRate * channels * 2;
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+  new Uint8Array(buffer, 44).set(pcm);
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+};
+
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
   const [minimaxKey, setMinimaxKey] = useState("");
   const [minimaxGroupId, setMinimaxGroupId] = useState("");
+  const [googleKey, setGoogleKey] = useState("");
   const [provider, setProvider] = useState<Provider>("elevenlabs");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  // typing indicator duration before each side-2 message (seconds)
+  const [typingSec, setTypingSec] = useState(0.9);
+  const [typingActive, setTypingActive] = useState(false);
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
@@ -103,6 +136,7 @@ export default function ChatStoryGenerator() {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setMinimaxKey(localStorage.getItem("minimax_api_key") || "");
     setMinimaxGroupId(localStorage.getItem("minimax_group_id") || "");
+    setGoogleKey(localStorage.getItem("google_ai_api_key") || "");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -110,6 +144,9 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("minimax_api_key", minimaxKey);
   }, [minimaxKey]);
+  useEffect(() => {
+    localStorage.setItem("google_ai_api_key", googleKey);
+  }, [googleKey]);
   useEffect(() => {
     localStorage.setItem("minimax_group_id", minimaxGroupId);
   }, [minimaxGroupId]);
@@ -281,6 +318,29 @@ export default function ChatStoryGenerator() {
     return hexToBlobUrl(hex);
   };
 
+  const ttsGoogle = async (text: string, voiceName: string): Promise<string> => {
+    // voiceName = a Google AI Studio prebuilt voice (e.g. "Kore", "Puck", "Zephyr")
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(googleKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || "Kore" } },
+          },
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const json = await res.json();
+    const b64 = json?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!b64) throw new Error("Google: missing audio in response");
+    return pcmToWavUrl(b64, 24000, 1);
+  };
+
   const generateAudios = async () => {
     if (provider === "elevenlabs" && !elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
@@ -288,6 +348,10 @@ export default function ChatStoryGenerator() {
     }
     if (provider === "minimax" && !minimaxKey) {
       alert("Por favor, insira sua API key do Minimax");
+      return;
+    }
+    if (provider === "google" && !googleKey) {
+      alert("Por favor, insira sua API key do Google AI Studio");
       return;
     }
 
@@ -319,7 +383,9 @@ export default function ChatStoryGenerator() {
         const audioUrl =
           provider === "elevenlabs"
             ? await ttsElevenLabs(msg.text, voiceId)
-            : await ttsMinimax(msg.text, voiceId);
+            : provider === "minimax"
+              ? await ttsMinimax(msg.text, voiceId)
+              : await ttsGoogle(msg.text, voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
@@ -360,6 +426,17 @@ export default function ChatStoryGenerator() {
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
+
+        // Typing indicator for the right side (side "2") before message appears
+        const typingMs = Math.max(0, Math.round(typingSec * 1000));
+        if (msg.side === "2" && typingMs > 0) {
+          setTypingActive(true);
+          await new Promise((r) => requestAnimationFrame(() => r(null)));
+          scrollDown();
+          await new Promise((r) => setTimeout(r, typingMs));
+          setTypingActive(false);
+        }
+
         queue.push(msg);
         setVisibleMessages([...queue]);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -375,6 +452,7 @@ export default function ChatStoryGenerator() {
         }
       }
     }
+    setTypingActive(false);
     setPlayingChatId(null);
     setPlaying(false);
   };
@@ -441,8 +519,21 @@ export default function ChatStoryGenerator() {
             />
           </div>
           <div className="space-y-2">
+            <Label>Google AI Studio API Key</Label>
+            <Input
+              type="password"
+              value={googleKey}
+              onChange={(e) => setGoogleKey(e.target.value)}
+              placeholder="AIza..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Use o nome da voz prebuilt como Voice ID (ex.: <code>Kore</code>, <code>Puck</code>,{" "}
+              <code>Zephyr</code>, <code>Charon</code>).
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>TTS Provider</Label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant={provider === "elevenlabs" ? "default" : "outline"}
@@ -456,6 +547,13 @@ export default function ChatStoryGenerator() {
                 onClick={() => setProvider("minimax")}
               >
                 Minimax
+              </Button>
+              <Button
+                size="sm"
+                variant={provider === "google" ? "default" : "outline"}
+                onClick={() => setProvider("google")}
+              >
+                Google AI Studio
               </Button>
             </div>
           </div>
@@ -649,6 +747,25 @@ export default function ChatStoryGenerator() {
               1s
             </Button>
           </div>
+        </div>
+
+        {/* Typing indicator duration */}
+        <div className="space-y-2 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <Label>"Digitando..." antes da mensagem (lado direito)</Label>
+            <span className="text-xs text-muted-foreground">{typingSec.toFixed(2)}s</span>
+          </div>
+          <Input
+            type="number"
+            step={0.1}
+            min={0}
+            value={typingSec}
+            onChange={(e) => setTypingSec(Math.max(0, Number(e.target.value) || 0))}
+            placeholder="0.9"
+          />
+          <p className="text-xs text-muted-foreground">
+            Mostra os "..." antes de cada mensagem do contato (lado direito) e some quando o áudio começa. 0 = desativado.
+          </p>
         </div>
 
         {/* Voice mapping — manual voice IDs per character */}
@@ -884,6 +1001,21 @@ export default function ChatStoryGenerator() {
                   )}
                 </motion.div>
               ))}
+              {typingActive && (
+                <motion.div
+                  key="typing-indicator"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex mb-1 justify-end"
+                >
+                  <div className="bg-[#0A84FF] rounded-2xl rounded-br-sm px-3 py-2 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" />
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </div>
