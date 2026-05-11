@@ -110,8 +110,6 @@ export default function ChatStoryGenerator() {
   // typing indicator duration before each side-2 message (seconds)
   const [typingSec, setTypingSec] = useState(0.9);
   const [typingActive, setTypingActive] = useState(false);
-  const [provider, setProvider] = useState<Provider>("elevenlabs");
-  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
