@@ -350,6 +350,10 @@ export default function ChatStoryGenerator() {
       alert("Por favor, insira sua API key do Minimax");
       return;
     }
+    if (provider === "google" && !googleKey) {
+      alert("Por favor, insira sua API key do Google AI Studio");
+      return;
+    }
 
     const allTexts = chats.flatMap((c) =>
       c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
