@@ -136,6 +136,7 @@ export default function ChatStoryGenerator() {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setMinimaxKey(localStorage.getItem("minimax_api_key") || "");
     setMinimaxGroupId(localStorage.getItem("minimax_group_id") || "");
+    setGoogleKey(localStorage.getItem("google_ai_api_key") || "");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -143,6 +144,9 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("minimax_api_key", minimaxKey);
   }, [minimaxKey]);
+  useEffect(() => {
+    localStorage.setItem("google_ai_api_key", googleKey);
+  }, [googleKey]);
   useEffect(() => {
     localStorage.setItem("minimax_group_id", minimaxGroupId);
   }, [minimaxGroupId]);
