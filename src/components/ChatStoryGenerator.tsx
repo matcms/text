@@ -44,7 +44,7 @@ type Chat = {
   messages: Msg[];
 };
 
-type Provider = "elevenlabs" | "minimax";
+type Provider = "elevenlabs" | "minimax" | "google";
 
 const DEFAULT_SCRIPT = `- iMessage: Nate
 1: Adam> Dude, we're seriously screwed.
