@@ -383,7 +383,9 @@ export default function ChatStoryGenerator() {
         const audioUrl =
           provider === "elevenlabs"
             ? await ttsElevenLabs(msg.text, voiceId)
-            : await ttsMinimax(msg.text, voiceId);
+            : provider === "minimax"
+              ? await ttsMinimax(msg.text, voiceId)
+              : await ttsGoogle(msg.text, voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
