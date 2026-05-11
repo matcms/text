@@ -426,6 +426,17 @@ export default function ChatStoryGenerator() {
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
+
+        // Typing indicator for the right side (side "2") before message appears
+        const typingMs = Math.max(0, Math.round(typingSec * 1000));
+        if (msg.side === "2" && typingMs > 0) {
+          setTypingActive(true);
+          await new Promise((r) => requestAnimationFrame(() => r(null)));
+          scrollDown();
+          await new Promise((r) => setTimeout(r, typingMs));
+          setTypingActive(false);
+        }
+
         queue.push(msg);
         setVisibleMessages([...queue]);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -441,6 +452,7 @@ export default function ChatStoryGenerator() {
         }
       }
     }
+    setTypingActive(false);
     setPlayingChatId(null);
     setPlaying(false);
   };
