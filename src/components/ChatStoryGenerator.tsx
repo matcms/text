@@ -74,12 +74,8 @@ const base64ToBlobUrl = (b64: string, mime = "audio/mpeg") => {
 
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
-  const [googleCloudKey, setGoogleCloudKey] = useState("");
-  const [provider, setProvider] = useState<Provider>("elevenlabs");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
-  const [typingSec, setTypingSec] = useState(0.9);
-  const [typingActive, setTypingActive] = useState(false);
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
@@ -103,22 +99,14 @@ export default function ChatStoryGenerator() {
   // Persist keys
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
-    setGoogleCloudKey(localStorage.getItem("google_cloud_tts_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
-    setProvider((localStorage.getItem("tts_provider") as Provider) || "elevenlabs");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
   }, [elevenKey]);
   useEffect(() => {
-    localStorage.setItem("google_cloud_tts_key", googleCloudKey);
-  }, [googleCloudKey]);
-  useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
-  useEffect(() => {
-    localStorage.setItem("tts_provider", provider);
-  }, [provider]);
 
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
