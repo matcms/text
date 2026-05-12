@@ -244,32 +244,9 @@ export default function ChatStoryGenerator() {
     return URL.createObjectURL(blob);
   };
 
-  const ttsGoogleCloud = async (text: string, voiceName: string): Promise<string> => {
-    const langCode = voiceName.split("-").slice(0, 2).join("-");
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(googleCloudKey)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text },
-        voice: { languageCode: langCode, name: voiceName },
-        audioConfig: { audioEncoding: "MP3", speakingRate: voiceSpeed },
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const json = await res.json();
-    const b64 = json?.audioContent;
-    if (!b64) throw new Error("Google Cloud TTS: missing audioContent");
-    return base64ToBlobUrl(b64, "audio/mpeg");
-  };
-
   const generateAudios = async () => {
-    if (provider === "elevenlabs" && !elevenKey) {
+    if (!elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
-      return;
-    }
-    if (provider === "google-cloud" && !googleCloudKey) {
-      alert("Por favor, insira sua API key do Google Cloud TTS");
       return;
     }
 
@@ -292,10 +269,7 @@ export default function ChatStoryGenerator() {
 
     for (const { chatId, msg } of allTexts) {
       try {
-        const audioUrl =
-          provider === "elevenlabs"
-            ? await ttsElevenLabs(msg.text, msg.voiceName)
-            : await ttsGoogleCloud(msg.text, msg.voiceName);
+        const audioUrl = await ttsElevenLabs(msg.text, msg.voiceName);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
