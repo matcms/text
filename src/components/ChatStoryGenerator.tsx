@@ -41,11 +41,11 @@ type Chat = {
   name: string;
   contactName: string;
   contactPhoto: string | null;
+  headerTime: string;
   script: string;
   messages: Msg[];
 };
 
-type Provider = "elevenlabs" | "google-cloud";
 type ChatTheme = "imessage" | "whatsapp";
 
 const DEFAULT_SCRIPT = `- Header: Nate
@@ -59,6 +59,7 @@ const newChat = (i: number): Chat => ({
   name: `Chat ${i}`,
   contactName: "Nate",
   contactPhoto: null,
+  headerTime: "23",
   script: DEFAULT_SCRIPT,
   messages: [],
 });
@@ -73,12 +74,8 @@ const base64ToBlobUrl = (b64: string, mime = "audio/mpeg") => {
 
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
-  const [googleCloudKey, setGoogleCloudKey] = useState("");
-  const [provider, setProvider] = useState<Provider>("elevenlabs");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
-  const [typingSec, setTypingSec] = useState(0.9);
-  const [typingActive, setTypingActive] = useState(false);
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
@@ -102,22 +99,14 @@ export default function ChatStoryGenerator() {
   // Persist keys
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
-    setGoogleCloudKey(localStorage.getItem("google_cloud_tts_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
-    setProvider((localStorage.getItem("tts_provider") as Provider) || "elevenlabs");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
   }, [elevenKey]);
   useEffect(() => {
-    localStorage.setItem("google_cloud_tts_key", googleCloudKey);
-  }, [googleCloudKey]);
-  useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
-  useEffect(() => {
-    localStorage.setItem("tts_provider", provider);
-  }, [provider]);
 
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
@@ -255,32 +244,9 @@ export default function ChatStoryGenerator() {
     return URL.createObjectURL(blob);
   };
 
-  const ttsGoogleCloud = async (text: string, voiceName: string): Promise<string> => {
-    const langCode = voiceName.split("-").slice(0, 2).join("-");
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(googleCloudKey)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text },
-        voice: { languageCode: langCode, name: voiceName },
-        audioConfig: { audioEncoding: "MP3", speakingRate: voiceSpeed },
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const json = await res.json();
-    const b64 = json?.audioContent;
-    if (!b64) throw new Error("Google Cloud TTS: missing audioContent");
-    return base64ToBlobUrl(b64, "audio/mpeg");
-  };
-
   const generateAudios = async () => {
-    if (provider === "elevenlabs" && !elevenKey) {
+    if (!elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
-      return;
-    }
-    if (provider === "google-cloud" && !googleCloudKey) {
-      alert("Por favor, insira sua API key do Google Cloud TTS");
       return;
     }
 
@@ -303,10 +269,7 @@ export default function ChatStoryGenerator() {
 
     for (const { chatId, msg } of allTexts) {
       try {
-        const audioUrl =
-          provider === "elevenlabs"
-            ? await ttsElevenLabs(msg.text, msg.voiceName)
-            : await ttsGoogleCloud(msg.text, msg.voiceName);
+        const audioUrl = await ttsElevenLabs(msg.text, msg.voiceName);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
@@ -346,15 +309,6 @@ export default function ChatStoryGenerator() {
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
 
-        const typingMs = Math.max(0, Math.round(typingSec * 1000));
-        if (msg.side === "2" && typingMs > 0) {
-          setTypingActive(true);
-          await new Promise((r) => requestAnimationFrame(() => r(null)));
-          scrollDown();
-          await new Promise((r) => setTimeout(r, typingMs));
-          setTypingActive(false);
-        }
-
         queue.push(msg);
         setVisibleMessages([...queue]);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -369,7 +323,6 @@ export default function ChatStoryGenerator() {
         }
       }
     }
-    setTypingActive(false);
     setPlayingChatId(null);
     setPlaying(false);
   };
@@ -428,26 +381,6 @@ export default function ChatStoryGenerator() {
           </div>
 
           <div className="space-y-2">
-            <Label>TTS Provider</Label>
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                size="sm"
-                variant={provider === "elevenlabs" ? "default" : "outline"}
-                onClick={() => setProvider("elevenlabs")}
-              >
-                ElevenLabs
-              </Button>
-              <Button
-                size="sm"
-                variant={provider === "google-cloud" ? "default" : "outline"}
-                onClick={() => setProvider("google-cloud")}
-              >
-                Google Cloud TTS
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
             <Label>ElevenLabs API Key</Label>
             <Input
               type="password"
@@ -457,19 +390,6 @@ export default function ChatStoryGenerator() {
             />
             <p className="text-xs text-muted-foreground">
               No script use o <strong>nome</strong> da voz da sua biblioteca (ex.: <code>Adam</code>).
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Google Cloud TTS API Key</Label>
-            <Input
-              type="password"
-              value={googleCloudKey}
-              onChange={(e) => setGoogleCloudKey(e.target.value)}
-              placeholder="AIza..."
-            />
-            <p className="text-xs text-muted-foreground">
-              No script use o nome exato da voz (ex.: <code>pt-BR-Neural2-B</code>).
             </p>
           </div>
 
@@ -649,21 +569,6 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
-        {/* Typing indicator */}
-        <div className="space-y-2 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <Label>"Digitando..." antes da mensagem (lado direito)</Label>
-            <span className="text-xs text-muted-foreground">{typingSec.toFixed(2)}s</span>
-          </div>
-          <Input
-            type="number"
-            step={0.1}
-            min={0}
-            value={typingSec}
-            onChange={(e) => setTypingSec(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0.9"
-          />
-        </div>
 
         <Button
           onClick={generateAudios}
@@ -778,44 +683,46 @@ export default function ChatStoryGenerator() {
       </div>
 
       {/* RIGHT */}
-      <div
-        className={`w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen ${
-          isWA ? "bg-emerald-900" : "bg-purple-600"
-        }`}
-      >
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen bg-background">
         <div
-          className="relative bg-black rounded-[3rem] overflow-hidden shadow-2xl border-[10px] border-black flex flex-col"
+          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
           {isWA ? (
-            <div className="bg-[#1f2c34] text-[#e9edef] flex items-center p-3 gap-3 shadow-sm z-10">
-              <ChevronLeft className="h-5 w-5 text-[#e9edef]" />
+            <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
+              <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
               {displayChat.contactPhoto ? (
                 <img
                   src={displayChat.contactPhoto}
                   alt={displayChat.contactName}
-                  className="w-9 h-9 rounded-full object-cover"
+                  className="w-10 h-10 rounded-full object-cover"
                 />
               ) : (
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-sm font-medium">
-                  {displayChat.contactName.charAt(0).toUpperCase()}
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-500 flex items-center justify-center text-white text-sm font-medium">
+                  <User className="h-6 w-6 text-white/80" />
                 </div>
               )}
               <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-[15px] font-semibold truncate">
+                <span className="text-[17px] font-semibold truncate leading-tight">
                   {displayChat.contactName}
                 </span>
-                <span className="text-xs text-[#8696a0]">Online</span>
+                <span className="text-[12px] text-[#8696a0] leading-tight">Online</span>
               </div>
-              <Video className="h-5 w-5 text-[#00a884]" />
-              <Phone className="h-5 w-5 text-[#00a884]" />
+              <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
+              <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
             </div>
           ) : (
             <div className="bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 flex items-center justify-between border-b border-white/5">
               <div className="flex items-center gap-1 text-[#0A84FF]">
                 <ChevronLeft className="h-6 w-6" />
-                <span className="text-sm">23</span>
+                <input
+                  value={displayChat.headerTime}
+                  onChange={(e) =>
+                    updateChatById(displayChat.id, { headerTime: e.target.value })
+                  }
+                  className="bg-transparent border-none outline-none text-sm w-10 text-[#0A84FF] p-0"
+                />
               </div>
               <div className="flex flex-col items-center">
                 {displayChat.contactPhoto ? (
@@ -838,10 +745,19 @@ export default function ChatStoryGenerator() {
           {/* Chat */}
           <div
             ref={chatScrollRef}
-            className={`flex-1 p-4 overflow-y-auto scroll-smooth ${
+            className={`flex-1 p-3 overflow-y-auto scroll-smooth ${
               isWA ? "bg-[#0b141a]" : "bg-black"
             }`}
-            style={{ scrollbarWidth: "none" }}
+            style={
+              isWA
+                ? {
+                    scrollbarWidth: "none",
+                    backgroundImage:
+                      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
+                    backgroundRepeat: "repeat",
+                  }
+                : { scrollbarWidth: "none" }
+            }
           >
             <AnimatePresence>
               {(playing ? visibleMessages : displayChat.messages).map((m) => (
@@ -856,10 +772,10 @@ export default function ChatStoryGenerator() {
                   {m.type === "text" ? (
                     isWA ? (
                       <div
-                        className={`max-w-[80%] py-1.5 px-3 text-[#e9edef] text-[15px] leading-snug ${
+                        className={`max-w-[80%] py-2 px-3 text-white text-[15px] leading-snug shadow-sm ${
                           m.side === "2"
                             ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto"
-                            : "bg-[#202c33] rounded-lg rounded-tl-none"
+                            : "bg-[#262d31] rounded-lg rounded-tl-none"
                         }`}
                       >
                         {m.text}
@@ -879,7 +795,7 @@ export default function ChatStoryGenerator() {
                     isWA ? (
                       <div
                         className={`p-1 rounded-lg ${
-                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#202c33]"
+                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
                         }`}
                       >
                         <img
@@ -897,7 +813,7 @@ export default function ChatStoryGenerator() {
                     )
                   ) : (
                     <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
-                      isWA ? "bg-[#202c33] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
+                      isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
                     }`}>
                       <ImageIcon className="h-8 w-8" />
                       <span className="text-center">{m.text}</span>
@@ -905,27 +821,6 @@ export default function ChatStoryGenerator() {
                   )}
                 </motion.div>
               ))}
-              {typingActive && (
-                <motion.div
-                  key="typing-indicator"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="flex mb-1 justify-end"
-                >
-                  <div
-                    className={`px-3 py-2 flex items-center gap-1 ${
-                      isWA
-                        ? "bg-[#005c4b] rounded-lg rounded-tr-none"
-                        : "bg-[#0A84FF] rounded-2xl rounded-br-sm"
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" />
-                  </div>
-                </motion.div>
-              )}
             </AnimatePresence>
           </div>
         </div>
