@@ -713,8 +713,8 @@ export default function ChatStoryGenerator() {
               <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
             </div>
           ) : (
-            <div className="bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 flex items-center justify-between border-b border-white/5">
-              <div className="flex items-center gap-1 text-[#0A84FF]">
+            <div className="relative bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 border-b border-white/5">
+              <div className="flex items-center gap-1 text-[#0A84FF] absolute left-3 top-1/2 -translate-y-1/2">
                 <ChevronLeft className="h-6 w-6" />
                 <input
                   value={displayChat.headerTime}
@@ -724,7 +724,7 @@ export default function ChatStoryGenerator() {
                   className="bg-transparent border-none outline-none text-sm w-10 text-[#0A84FF] p-0"
                 />
               </div>
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center mx-auto w-fit">
                 {displayChat.contactPhoto ? (
                   <img
                     src={displayChat.contactPhoto}
@@ -738,7 +738,7 @@ export default function ChatStoryGenerator() {
                 )}
                 <span className="text-white text-[10px] mt-0.5">{displayChat.contactName}</span>
               </div>
-              <Video className="h-5 w-5 text-[#0A84FF]" />
+              <Video className="h-5 w-5 text-[#0A84FF] absolute right-3 top-1/2 -translate-y-1/2" />
             </div>
           )}
 
