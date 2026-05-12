@@ -59,6 +59,7 @@ const newChat = (i: number): Chat => ({
   name: `Chat ${i}`,
   contactName: "Nate",
   contactPhoto: null,
+  headerTime: "23",
   script: DEFAULT_SCRIPT,
   messages: [],
 });
