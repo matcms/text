@@ -142,3 +142,27 @@
     color: var(--color-foreground);
   }
 }
+
+/* WhatsApp bubble tails */
+.wa-tail-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 8px 8px;
+  border-color: transparent transparent transparent #005c4b;
+}
+.wa-tail-left::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 8px 8px 0;
+  border-color: transparent #262d31 transparent transparent;
+}
