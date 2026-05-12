@@ -772,10 +772,10 @@ export default function ChatStoryGenerator() {
                   {m.type === "text" ? (
                     isWA ? (
                       <div
-                        className={`max-w-[80%] py-2 px-3 text-white text-[15px] leading-snug shadow-sm ${
+                        className={`relative max-w-[80%] py-1.5 px-2.5 text-white text-[15px] leading-snug shadow-sm ${
                           m.side === "2"
-                            ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto"
-                            : "bg-[#262d31] rounded-lg rounded-tl-none"
+                            ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto wa-tail-right"
+                            : "bg-[#262d31] rounded-lg rounded-tl-none wa-tail-left"
                         }`}
                       >
                         {m.text}
