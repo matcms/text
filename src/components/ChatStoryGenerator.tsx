@@ -569,21 +569,6 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
-        {/* Typing indicator */}
-        <div className="space-y-2 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <Label>"Digitando..." antes da mensagem (lado direito)</Label>
-            <span className="text-xs text-muted-foreground">{typingSec.toFixed(2)}s</span>
-          </div>
-          <Input
-            type="number"
-            step={0.1}
-            min={0}
-            value={typingSec}
-            onChange={(e) => setTypingSec(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0.9"
-          />
-        </div>
 
         <Button
           onClick={generateAudios}
