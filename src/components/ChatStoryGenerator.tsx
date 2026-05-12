@@ -381,26 +381,6 @@ export default function ChatStoryGenerator() {
           </div>
 
           <div className="space-y-2">
-            <Label>TTS Provider</Label>
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                size="sm"
-                variant={provider === "elevenlabs" ? "default" : "outline"}
-                onClick={() => setProvider("elevenlabs")}
-              >
-                ElevenLabs
-              </Button>
-              <Button
-                size="sm"
-                variant={provider === "google-cloud" ? "default" : "outline"}
-                onClick={() => setProvider("google-cloud")}
-              >
-                Google Cloud TTS
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
             <Label>ElevenLabs API Key</Label>
             <Input
               type="password"
@@ -410,19 +390,6 @@ export default function ChatStoryGenerator() {
             />
             <p className="text-xs text-muted-foreground">
               No script use o <strong>nome</strong> da voz da sua biblioteca (ex.: <code>Adam</code>).
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Google Cloud TTS API Key</Label>
-            <Input
-              type="password"
-              value={googleCloudKey}
-              onChange={(e) => setGoogleCloudKey(e.target.value)}
-              placeholder="AIza..."
-            />
-            <p className="text-xs text-muted-foreground">
-              No script use o nome exato da voz (ex.: <code>pt-BR-Neural2-B</code>).
             </p>
           </div>
 
