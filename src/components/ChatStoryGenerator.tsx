@@ -41,11 +41,11 @@ type Chat = {
   name: string;
   contactName: string;
   contactPhoto: string | null;
+  headerTime: string;
   script: string;
   messages: Msg[];
 };
 
-type Provider = "elevenlabs" | "google-cloud";
 type ChatTheme = "imessage" | "whatsapp";
 
 const DEFAULT_SCRIPT = `- Header: Nate
