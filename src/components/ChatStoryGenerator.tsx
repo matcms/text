@@ -683,44 +683,46 @@ export default function ChatStoryGenerator() {
       </div>
 
       {/* RIGHT */}
-      <div
-        className={`w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen ${
-          isWA ? "bg-emerald-900" : "bg-purple-600"
-        }`}
-      >
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen bg-background">
         <div
-          className="relative bg-black rounded-[3rem] overflow-hidden shadow-2xl border-[10px] border-black flex flex-col"
+          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
           {isWA ? (
-            <div className="bg-[#1f2c34] text-[#e9edef] flex items-center p-3 gap-3 shadow-sm z-10">
-              <ChevronLeft className="h-5 w-5 text-[#e9edef]" />
+            <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
+              <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
               {displayChat.contactPhoto ? (
                 <img
                   src={displayChat.contactPhoto}
                   alt={displayChat.contactName}
-                  className="w-9 h-9 rounded-full object-cover"
+                  className="w-10 h-10 rounded-full object-cover"
                 />
               ) : (
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-sm font-medium">
-                  {displayChat.contactName.charAt(0).toUpperCase()}
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-500 flex items-center justify-center text-white text-sm font-medium">
+                  <User className="h-6 w-6 text-white/80" />
                 </div>
               )}
               <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-[15px] font-semibold truncate">
+                <span className="text-[17px] font-semibold truncate leading-tight">
                   {displayChat.contactName}
                 </span>
-                <span className="text-xs text-[#8696a0]">Online</span>
+                <span className="text-[12px] text-[#8696a0] leading-tight">Online</span>
               </div>
-              <Video className="h-5 w-5 text-[#00a884]" />
-              <Phone className="h-5 w-5 text-[#00a884]" />
+              <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
+              <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
             </div>
           ) : (
             <div className="bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 flex items-center justify-between border-b border-white/5">
               <div className="flex items-center gap-1 text-[#0A84FF]">
                 <ChevronLeft className="h-6 w-6" />
-                <span className="text-sm">23</span>
+                <input
+                  value={displayChat.headerTime}
+                  onChange={(e) =>
+                    updateChatById(displayChat.id, { headerTime: e.target.value })
+                  }
+                  className="bg-transparent border-none outline-none text-sm w-10 text-[#0A84FF] p-0"
+                />
               </div>
               <div className="flex flex-col items-center">
                 {displayChat.contactPhoto ? (
@@ -743,10 +745,19 @@ export default function ChatStoryGenerator() {
           {/* Chat */}
           <div
             ref={chatScrollRef}
-            className={`flex-1 p-4 overflow-y-auto scroll-smooth ${
+            className={`flex-1 p-3 overflow-y-auto scroll-smooth ${
               isWA ? "bg-[#0b141a]" : "bg-black"
             }`}
-            style={{ scrollbarWidth: "none" }}
+            style={
+              isWA
+                ? {
+                    scrollbarWidth: "none",
+                    backgroundImage:
+                      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
+                    backgroundRepeat: "repeat",
+                  }
+                : { scrollbarWidth: "none" }
+            }
           >
             <AnimatePresence>
               {(playing ? visibleMessages : displayChat.messages).map((m) => (
@@ -761,10 +772,10 @@ export default function ChatStoryGenerator() {
                   {m.type === "text" ? (
                     isWA ? (
                       <div
-                        className={`max-w-[80%] py-1.5 px-3 text-[#e9edef] text-[15px] leading-snug ${
+                        className={`max-w-[80%] py-2 px-3 text-white text-[15px] leading-snug shadow-sm ${
                           m.side === "2"
                             ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto"
-                            : "bg-[#202c33] rounded-lg rounded-tl-none"
+                            : "bg-[#262d31] rounded-lg rounded-tl-none"
                         }`}
                       >
                         {m.text}
@@ -784,7 +795,7 @@ export default function ChatStoryGenerator() {
                     isWA ? (
                       <div
                         className={`p-1 rounded-lg ${
-                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#202c33]"
+                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
                         }`}
                       >
                         <img
@@ -802,7 +813,7 @@ export default function ChatStoryGenerator() {
                     )
                   ) : (
                     <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
-                      isWA ? "bg-[#202c33] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
+                      isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
                     }`}>
                       <ImageIcon className="h-8 w-8" />
                       <span className="text-center">{m.text}</span>
@@ -810,27 +821,6 @@ export default function ChatStoryGenerator() {
                   )}
                 </motion.div>
               ))}
-              {typingActive && (
-                <motion.div
-                  key="typing-indicator"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="flex mb-1 justify-end"
-                >
-                  <div
-                    className={`px-3 py-2 flex items-center gap-1 ${
-                      isWA
-                        ? "bg-[#005c4b] rounded-lg rounded-tr-none"
-                        : "bg-[#0A84FF] rounded-2xl rounded-br-sm"
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                    <span className="w-1.5 h-1.5 bg-white/80 rounded-full animate-bounce" />
-                  </div>
-                </motion.div>
-              )}
             </AnimatePresence>
           </div>
         </div>
