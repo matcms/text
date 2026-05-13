@@ -41,11 +41,24 @@ import {
   X,
   User,
   Users,
+  Save,
+  Trash2,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  saveProject,
+  listProjects,
+  deleteProject,
+  urlToBlob,
+  type StoredProject,
+  type StoredChat,
+  type StoredMsg,
+} from "@/lib/projects-db";
 
 type TextMsg = {
   id: number;
@@ -162,7 +175,129 @@ export default function ChatStoryGenerator() {
   } | null>(null);
   const [recording, setRecording] = useState(false);
 
-  // Persist keys
+  // Projects (IndexedDB)
+  const [projectName, setProjectName] = useState("");
+  const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
+  const [projects, setProjects] = useState<StoredProject[]>([]);
+  const [savingProject, setSavingProject] = useState(false);
+
+  const refreshProjects = async () => {
+    try {
+      setProjects(await listProjects());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  useEffect(() => {
+    refreshProjects();
+  }, []);
+
+  const handleSaveProject = async () => {
+    const name = projectName.trim();
+    if (!name) {
+      alert("Informe um nome para o projeto.");
+      return;
+    }
+    setSavingProject(true);
+    try {
+      const storedChats: StoredChat[] = [];
+      for (const c of chats) {
+        const messages: StoredMsg[] = [];
+        for (const m of c.messages) {
+          if (m.type === "text") {
+            messages.push({
+              id: m.id,
+              side: m.side,
+              type: "text",
+              voiceName: m.voiceName,
+              text: m.text,
+              audioBlob: await urlToBlob(m.audioUrl),
+            });
+          } else {
+            messages.push({
+              id: m.id,
+              side: m.side,
+              type: "image",
+              text: m.text,
+              imageBlob: await urlToBlob(m.imageUrl),
+            });
+          }
+        }
+        storedChats.push({
+          id: c.id,
+          name: c.name,
+          contactName: c.contactName,
+          contactPhotoBlob: await urlToBlob(c.contactPhoto),
+          headerTime: c.headerTime,
+          script: c.script,
+          messages,
+          voiceMap: c.voiceMap,
+        });
+      }
+      const project: StoredProject = {
+        id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        projectName: name,
+        theme: chatTheme,
+        isGroupChat,
+        messageDelay,
+        chats: storedChats,
+        createdAt: Date.now(),
+      };
+      await saveProject(project);
+      await refreshProjects();
+      alert("Projeto salvo!");
+    } catch (e) {
+      console.error(e);
+      alert("Falha ao salvar projeto: " + (e as Error).message);
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleLoadProject = (p: StoredProject) => {
+    const loadedChats: Chat[] = p.chats.map((c) => ({
+      id: c.id,
+      name: c.name,
+      contactName: c.contactName,
+      contactPhoto: c.contactPhotoBlob ? URL.createObjectURL(c.contactPhotoBlob) : null,
+      headerTime: c.headerTime,
+      script: c.script,
+      voiceMap: c.voiceMap,
+      messages: c.messages.map((m) =>
+        m.type === "text"
+          ? {
+              id: m.id,
+              side: m.side,
+              type: "text",
+              voiceName: m.voiceName,
+              text: m.text,
+              audioUrl: m.audioBlob ? URL.createObjectURL(m.audioBlob) : null,
+            }
+          : {
+              id: m.id,
+              side: m.side,
+              type: "image",
+              text: m.text,
+              imageUrl: m.imageBlob ? URL.createObjectURL(m.imageBlob) : null,
+            }
+      ),
+    }));
+    setChats(loadedChats);
+    setActiveChatId(loadedChats[0]?.id || "");
+    setChatTheme(p.theme);
+    setIsGroupChat(p.isGroupChat);
+    setMessageDelay(p.messageDelay);
+    setProjectName(p.projectName);
+    setVisibleMessages([]);
+    setActiveTab("editor");
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    if (!confirm("Excluir este projeto?")) return;
+    await deleteProject(id);
+    await refreshProjects();
+  };
+
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
@@ -414,7 +549,7 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const pauseMs = Math.max(0, Number(messageDelay) || 0);
+    const delayMs = Number(messageDelay) || 0;
 
     const scrollDown = () => {
       const el = chatScrollRef.current;
@@ -426,9 +561,6 @@ export default function ChatStoryGenerator() {
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
-      if (c > 0 && pauseMs > 0) {
-        await new Promise((r) => setTimeout(r, pauseMs));
-      }
 
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
@@ -440,30 +572,32 @@ export default function ChatStoryGenerator() {
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
+          const audio = new Audio(msg.audioUrl);
           if (rec) {
-            // route audio through MediaStreamDestination so MediaRecorder captures it
-            const buf = await fetch(msg.audioUrl).then((r) => r.arrayBuffer());
-            const audioBuf = await rec.audioCtx.decodeAudioData(buf.slice(0));
-            const src = rec.audioCtx.createBufferSource();
-            src.buffer = audioBuf;
-            src.connect(rec.dest);
-            src.connect(rec.audioCtx.destination);
-            src.start();
-            await new Promise((r) => (src.onended = () => r(null)));
-          } else {
-            const audio = new Audio(msg.audioUrl);
-            audio.play();
-            await new Promise((r) => (audio.onended = () => r(null)));
+            try {
+              const src = rec.audioCtx.createMediaElementSource(audio);
+              src.connect(rec.dest);
+              src.connect(rec.audioCtx.destination);
+            } catch (err) {
+              console.error("audio routing failed", err);
+            }
           }
-          if (Number(messageDelay) > 0) {
-            await new Promise((r) => setTimeout(r, Number(messageDelay)));
-          }
+          await new Promise<void>((resolve) => {
+            if (audio.readyState >= 1) resolve();
+            else
+              audio.addEventListener("loadedmetadata", () => resolve(), {
+                once: true,
+              });
+          });
+          audio.play().catch((err) => console.error("audio play failed", err));
+          const durationMs = (audio.duration || 0) * 1000;
+          // Negative delay overlaps next message into the tail of the audio.
+          const waitTime = Math.max(0, durationMs + delayMs);
+          await new Promise((r) => setTimeout(r, waitTime));
+          // Do NOT stop the audio: it keeps playing while the next message appears.
         }
         if (msg.type === "image") {
           await new Promise((r) => setTimeout(r, 2000));
-        }
-        if (i < chat.messages.length - 1 && pauseMs > 0) {
-          await new Promise((r) => setTimeout(r, pauseMs));
         }
       }
     }
@@ -545,7 +679,8 @@ export default function ChatStoryGenerator() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `chat-story-${Date.now()}.${ext}`;
+      const safeName = (projectName.trim() || "video").replace(/[^a-z0-9-_]+/gi, "_");
+      a.download = `${safeName}.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -575,15 +710,66 @@ export default function ChatStoryGenerator() {
   const isWA = chatTheme === "whatsapp";
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      {/* LEFT */}
-      <div className="w-full lg:w-1/2 overflow-y-auto bg-background p-8 space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Chat Story Generator</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Cole um script com <code>1: NomeDaVoz&gt; texto</code>, gere os áudios e reproduza um vídeo sincronizado.
-          </p>
+    <Tabs
+      value={activeTab}
+      onValueChange={(v) => setActiveTab(v as "editor" | "projects")}
+      className="min-h-screen"
+    >
+      {recording && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center text-white gap-4">
+          <Loader2 className="h-10 w-10 animate-spin" />
+          <div className="text-lg font-semibold">Renderizando vídeo...</div>
+          <div className="text-sm text-white/70">
+            Não feche esta aba. O download começará automaticamente.
+          </div>
         </div>
+      )}
+
+      <div className="border-b bg-background px-6 pt-4">
+        <TabsList>
+          <TabsTrigger value="editor">Editor</TabsTrigger>
+          <TabsTrigger value="projects">Meus Projetos ({projects.length})</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="editor" className="mt-0">
+        <div className="flex flex-col lg:flex-row">
+          {/* LEFT */}
+          <div className="w-full lg:w-1/2 overflow-y-auto bg-background p-8 space-y-6">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Chat Story Generator</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Cole um script com <code>1: NomeDaVoz&gt; texto</code>, gere os áudios e reproduza um vídeo sincronizado.
+              </p>
+            </div>
+
+            {/* Project name + save */}
+            <div className="space-y-2 rounded-lg border p-4">
+              <Label>Nome do projeto</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="Ex: Story do Nate"
+                />
+                <Button
+                  onClick={handleSaveProject}
+                  disabled={savingProject}
+                  variant="secondary"
+                >
+                  {savingProject ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-1" /> Salvar
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Salva script, áudios e imagens localmente (IndexedDB) para você não regerar áudios à toa.
+              </p>
+            </div>
 
         {/* Theme + Provider */}
         <div className="space-y-4 rounded-lg border p-4">
@@ -631,14 +817,14 @@ export default function ChatStoryGenerator() {
             <Label>Message Delay (ms)</Label>
             <Input
               type="number"
-              min={0}
               step={50}
               value={messageDelay}
-              onChange={(e) => setMessageDelay(Math.max(0, Number(e.target.value) || 0))}
+              onChange={(e) => setMessageDelay(Number(e.target.value) || 0)}
               placeholder="0"
             />
             <p className="text-xs text-muted-foreground">
-              Pausa adicional após cada áudio terminar (0 = sem pausa).
+              Pausa entre mensagens (0 = sem pausa). Use valores negativos (ex.: -300) para
+              sobrepor o áudio à próxima mensagem.
             </p>
           </div>
 
@@ -1207,7 +1393,59 @@ export default function ChatStoryGenerator() {
             </AnimatePresence>
           </div>
         </div>
-      </div>
-    </div>
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="projects" className="mt-0 p-8 bg-background min-h-[calc(100vh-60px)]">
+        <div className="max-w-4xl mx-auto space-y-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Meus Projetos</h2>
+            <p className="text-sm text-muted-foreground">
+              Projetos salvos localmente com áudios e imagens incluídos.
+            </p>
+          </div>
+          {projects.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
+              Nenhum projeto salvo ainda. Salve um projeto na aba Editor.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((p) => {
+                const totalMsgs = p.chats.reduce((acc, c) => acc + c.messages.length, 0);
+                return (
+                  <div
+                    key={p.id}
+                    className="rounded-lg border p-4 space-y-3 bg-card hover:shadow-md transition"
+                  >
+                    <div>
+                      <div className="font-semibold truncate">{p.projectName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(p.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {p.chats.length} chat(s) • {totalMsgs} mensagens • tema {p.theme}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => handleLoadProject(p)} className="flex-1">
+                        <FolderOpen className="h-3 w-3 mr-1" /> Carregar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleDeleteProject(p.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }
