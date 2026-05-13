@@ -1038,7 +1038,7 @@ export default function ChatStoryGenerator() {
                             {senderName}
                           </span>
                         )}
-                        {m.text}
+                        {renderCensored(m.text)}
                       </div>
                     ) : (
                       <div
