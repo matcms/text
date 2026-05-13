@@ -680,6 +680,11 @@ export default function ChatStoryGenerator() {
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
+          // Yield to React so DOM updates and auto-scroll happens BEFORE audio
+          await new Promise((r) => setTimeout(r, 100));
+          scrollDown();
+          await new Promise((r) => setTimeout(r, 100));
+
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
           if (rec) {
@@ -691,15 +696,32 @@ export default function ChatStoryGenerator() {
               console.error("audio routing failed", err);
             }
           }
+
+          // Workaround for Chrome's Infinity duration bug on Blob URLs
           await new Promise<void>((resolve) => {
-            if (audio.readyState >= 1) resolve();
-            else
-              audio.addEventListener("loadedmetadata", () => resolve(), {
-                once: true,
-              });
+            const onReady = () => {
+              if (!isFinite(audio.duration) || isNaN(audio.duration)) {
+                audio.currentTime = 1e101;
+                audio.addEventListener(
+                  "timeupdate",
+                  () => {
+                    audio.currentTime = 0;
+                    resolve();
+                  },
+                  { once: true },
+                );
+              } else {
+                resolve();
+              }
+            };
+            audio.addEventListener("loadedmetadata", onReady, { once: true });
+            if (audio.readyState >= 1) onReady();
           });
+
           audio.play().catch((err) => console.error("audio play failed", err));
-          const durationMs = (audio.duration || 0) * 1000;
+
+          let durationMs = (audio.duration || 0) * 1000;
+          if (!isFinite(durationMs) || durationMs <= 0) durationMs = 2000;
           const waitTime = Math.max(0, durationMs + delayMs);
           await new Promise((r) => setTimeout(r, waitTime));
         }
@@ -727,9 +749,8 @@ export default function ChatStoryGenerator() {
     setRecording(true);
     setExportProgress(0);
 
-    const SCALE = 2;
-    const W = (target.offsetWidth || 400) * SCALE;
-    const H = (target.offsetHeight || 711) * SCALE;
+    const W = 1080;
+    const H = 1920;
 
     const canvas = document.createElement("canvas");
     canvas.width = W;
@@ -776,33 +797,44 @@ export default function ChatStoryGenerator() {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
-    // Solicita chunks frequentes para garantir dados contínuos
     recorder.start(100);
 
-    // Captura de frames com setInterval — não bloqueia a animação
+    // Throttled capture loop (~20fps) with lock so React keeps CPU to scroll
     let isCapturing = true;
-    let frameInProgress = false;
-    const frameInterval = setInterval(async () => {
-      if (!isCapturing || !previewRef.current || frameInProgress) return;
-      frameInProgress = true;
-      try {
-        const snap = await toCanvas(previewRef.current, {
-          pixelRatio: SCALE,
-          cacheBust: false,
-          skipFonts: true,
-          style: { transform: "scale(1)", transformOrigin: "top left" },
-        });
-        ctx.clearRect(0, 0, W, H);
-        ctx.drawImage(snap, 0, 0, W, H);
-      } catch { /* frame perdido, sem problema */ }
-      finally { frameInProgress = false; }
-    }, 100); // 10fps de captura — suficiente para chat estático, muito mais leve
+    let isDrawing = false;
+    const captureFrame = async () => {
+      if (!isCapturing || !previewRef.current) return;
+      if (!isDrawing) {
+        isDrawing = true;
+        try {
+          const tempCanvas = await toCanvas(previewRef.current, {
+            pixelRatio: 2,
+            cacheBust: false,
+            skipFonts: false,
+            style: {
+              transform: "scale(1)",
+              transformOrigin: "top left",
+              margin: "0",
+              borderRadius: "0",
+            },
+          });
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(tempCanvas, 0, 0, W, H);
+        } catch (e) {
+          console.warn("Frame drop", e);
+        }
+        isDrawing = false;
+      }
+      if (isCapturing) {
+        requestAnimationFrame(() => setTimeout(captureFrame, 50));
+      }
+    };
+    requestAnimationFrame(captureFrame);
 
     try {
       await playAnimation();
     } finally {
       isCapturing = false;
-      clearInterval(frameInterval);
 
       // Aguarda último frame ser desenhado
       await new Promise<void>((r) => setTimeout(r, 500));
@@ -1479,8 +1511,7 @@ export default function ChatStoryGenerator() {
         <div className="relative" style={{ width: 400, height: 711 }}>
         <div
           ref={previewRef}
-          className="rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
-          style={{ width: 400, height: 711 }}
+          className="aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl bg-black"
         >
           {/* Header */}
           {isWA ? (
@@ -1560,7 +1591,7 @@ export default function ChatStoryGenerator() {
           {/* Chat */}
           <div
             ref={chatScrollRef}
-            className={`flex-1 p-3 overflow-y-auto scroll-smooth ${
+            className={`flex-1 w-full p-3 overflow-y-auto scroll-smooth ${
               isWA ? "bg-[#0b141a]" : "bg-black"
             }`}
             style={
