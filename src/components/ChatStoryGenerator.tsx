@@ -663,8 +663,34 @@ export default function ChatStoryGenerator() {
     setGenerating(false);
   };
 
+  const waitWhilePaused = async () => {
+    while (pausedRef.current) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+
+  const waitInterruptible = async (ms: number) => {
+    const start = Date.now();
+    let elapsed = 0;
+    while (elapsed < ms) {
+      if (pausedRef.current) {
+        const pauseStart = Date.now();
+        await waitWhilePaused();
+        // shift start so paused time doesn't count
+        const pausedFor = Date.now() - pauseStart;
+        // adjust by extending the deadline
+        ms += pausedFor;
+      }
+      const remaining = ms - (Date.now() - start);
+      await new Promise((r) => setTimeout(r, Math.min(100, remaining)));
+      elapsed = Date.now() - start;
+    }
+  };
+
   const playAnimation = async (onFrameReady?: () => Promise<void>) => {
     setPlaying(true);
+    setPaused(false);
+    pausedRef.current = false;
     const delayMs = Number(messageDelay) || 0;
     const scrollDown = () => {
       const el = chatScrollRef.current;
@@ -679,6 +705,7 @@ export default function ChatStoryGenerator() {
       if (onFrameReady) await onFrameReady();
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
+        await waitWhilePaused();
         const msg = chat.messages[i];
         queue.push(msg);
         setVisibleMessages([...queue]);
@@ -689,6 +716,7 @@ export default function ChatStoryGenerator() {
         if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
+          currentAudioRef.current = audio;
           if (rec) {
             try {
               const src = rec.audioCtx.createMediaElementSource(audio);
@@ -705,10 +733,11 @@ export default function ChatStoryGenerator() {
           audio.play().catch((err) => console.error("audio play failed", err));
           const durationMs = (audio.duration || 0) * 1000;
           const waitTime = Math.max(0, durationMs + delayMs);
-          await new Promise((r) => setTimeout(r, waitTime));
+          await waitInterruptible(waitTime);
+          currentAudioRef.current = null;
         }
         if (msg.type === "image") {
-          await new Promise((r) => setTimeout(r, 2000));
+          await waitInterruptible(2000);
         }
         if (exportProgressRef.current) {
           exportProgressRef.current.done += 1;
@@ -719,6 +748,19 @@ export default function ChatStoryGenerator() {
     }
     setPlayingChatId(null);
     setPlaying(false);
+    setPaused(false);
+    pausedRef.current = false;
+  };
+
+  const togglePause = () => {
+    const next = !pausedRef.current;
+    pausedRef.current = next;
+    setPaused(next);
+    const audio = currentAudioRef.current;
+    if (audio) {
+      if (next) audio.pause();
+      else audio.play().catch(() => {});
+    }
   };
 
   const recordVideo = async () => {
