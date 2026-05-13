@@ -51,6 +51,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import {
   saveProject,
   listProjects,
@@ -526,6 +528,58 @@ export default function ChatStoryGenerator() {
     if (!res.ok) throw new Error(await res.text());
     const blob = await res.blob();
     return URL.createObjectURL(blob);
+  };
+
+  // Reusable single-message audio generator (resolves voice from chat voiceMap, savedVoices, or raw id)
+  const generateSingleAudio = async (
+    text: string,
+    voiceIdentifier: string,
+    chatId: string
+  ): Promise<string> => {
+    if (!elevenKey) throw new Error("API key do ElevenLabs ausente.");
+    const chat = chats.find((c) => c.id === chatId);
+    let voiceId = (chat?.voiceMap[voiceIdentifier] || "").trim();
+    if (!voiceId) {
+      const sv = savedVoices.find(
+        (v) => v.name.toLowerCase() === voiceIdentifier.toLowerCase()
+      );
+      if (sv) voiceId = sv.voiceId;
+    }
+    if (!voiceId) voiceId = voiceIdentifier.trim();
+    if (!voiceId) throw new Error(`Voice ID não encontrado para "${voiceIdentifier}".`);
+    return ttsElevenLabs(stripCensors(text), voiceId);
+  };
+
+  const [regeneratingMsgId, setRegeneratingMsgId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const updateTextMessage = (msgId: number, patch: Partial<TextMsg>) => {
+    updateActiveChat({
+      messages: activeChat.messages.map((m) =>
+        m.id === msgId && m.type === "text" ? { ...m, ...patch } : m
+      ),
+    });
+  };
+
+  const regenerateOneAudio = async (msgId: number) => {
+    const msg = activeChat.messages.find((m) => m.id === msgId && m.type === "text") as
+      | TextMsg
+      | undefined;
+    if (!msg) return;
+    setRegeneratingMsgId(msgId);
+    try {
+      const url = await generateSingleAudio(
+        msg.spokenText ?? msg.text,
+        msg.voiceName,
+        activeChat.id
+      );
+      updateTextMessage(msgId, { audioUrl: url });
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao regenerar áudio: ${(e as Error).message}`);
+    } finally {
+      setRegeneratingMsgId(null);
+    }
   };
 
   const generateAudios = async () => {
@@ -1138,6 +1192,81 @@ export default function ChatStoryGenerator() {
             "Gerar áudios (todos os chats)"
           )}
         </Button>
+
+        {/* Post-Generation Editor */}
+        {(() => {
+          const textMsgs = activeChat.messages.filter(
+            (m): m is TextMsg => m.type === "text"
+          );
+          const hasAnyAudio = textMsgs.some((m) => !!m.audioUrl);
+          if (textMsgs.length === 0 || !hasAnyAudio) return null;
+          return (
+            <Collapsible
+              open={editorOpen}
+              onOpenChange={setEditorOpen}
+              className="rounded-lg border"
+            >
+              <CollapsibleTrigger className="flex w-full items-center justify-between p-4 text-left">
+                <div>
+                  <h2 className="font-semibold text-sm">Post-Generation Editor</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Corrija typos ou troque a voz de mensagens individuais sem regerar tudo.
+                  </p>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${editorOpen ? "rotate-180" : ""}`}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="px-4 pb-4 space-y-3">
+                {textMsgs.map((msg) => {
+                  const isLoading = regeneratingMsgId === msg.id;
+                  return (
+                    <div key={msg.id} className="rounded-md border p-3 space-y-2">
+                      <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+                        <div className="space-y-2">
+                          <Input
+                            className="h-8 text-xs"
+                            placeholder="Voz (ex: Adam)"
+                            value={msg.voiceName}
+                            onChange={(e) =>
+                              updateTextMessage(msg.id, { voiceName: e.target.value })
+                            }
+                          />
+                          <Textarea
+                            className="text-xs min-h-[60px]"
+                            value={msg.text}
+                            onChange={(e) =>
+                              updateTextMessage(msg.id, {
+                                text: e.target.value,
+                                spokenText: undefined,
+                              })
+                            }
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isLoading || !msg.voiceName.trim() || !msg.text.trim()}
+                          onClick={() => regenerateOneAudio(msg.id)}
+                          title="Regenerar este áudio"
+                        >
+                          {isLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      {msg.audioUrl && (
+                        <audio controls src={msg.audioUrl} className="h-8 w-full mt-2" />
+                      )}
+                    </div>
+                  );
+                })}
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })()}
 
         {imageMessages.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
