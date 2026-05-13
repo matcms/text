@@ -1200,6 +1200,60 @@ export default function ChatStoryGenerator() {
           </div>
         )}
 
+        {(() => {
+          const isGroup = activeChat.isGroupChat ?? isGroupChat;
+          if (!isGroup) return null;
+          const displayNames = Array.from(
+            new Set(
+              activeChat.messages
+                .filter((m): m is TextMsg => m.type === "text")
+                .map((m) => m.displayName)
+                .filter((n): n is string => !!n)
+            )
+          );
+          if (displayNames.length === 0) return null;
+          const colors = activeChat.nameColors || {};
+          return (
+            <div className="space-y-3 rounded-lg border p-4">
+              <h2 className="font-semibold text-sm">Cores dos nomes (Group Chat)</h2>
+              <p className="text-xs text-muted-foreground">
+                Escolha a cor do nome exibido acima das mensagens no chat de grupo.
+              </p>
+              {displayNames.map((name) => {
+                const current = colors[name] || "";
+                return (
+                  <div key={name} className="flex items-center gap-2">
+                    <Label className="text-xs w-24 truncate capitalize">{name}</Label>
+                    <div
+                      className="h-5 w-5 rounded-full border"
+                      style={{
+                        backgroundColor:
+                          current ||
+                          (chatTheme === "whatsapp" ? "#53bdeb" : "#8e8e93"),
+                      }}
+                    />
+                    <select
+                      className="h-9 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
+                      value={current}
+                      onChange={(e) =>
+                        updateActiveChat({
+                          nameColors: { ...colors, [name]: e.target.value },
+                        })
+                      }
+                    >
+                      {NAME_COLOR_OPTIONS.map((opt) => (
+                        <option key={opt.label} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         <Button
           onClick={generateAudios}
           disabled={generating}
