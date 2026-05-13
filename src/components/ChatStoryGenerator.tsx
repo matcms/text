@@ -1502,6 +1502,10 @@ export default function ChatStoryGenerator() {
                   m.side === "1" &&
                   m.type === "text" &&
                   !!m.displayName;
+                const nameColor =
+                  m.type === "text" && m.displayName
+                    ? displayChat.nameColors?.[m.displayName] || ""
+                    : "";
                 return (
                 <motion.div
                   key={m.id}
