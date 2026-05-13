@@ -414,8 +414,16 @@ export default function ChatStoryGenerator() {
       const voiceMap: Record<string, string> = {};
       for (const n of uniqueNames) voiceMap[n] = baseMap[n] || "";
 
+      const resolvedGroup = s.groupMode ?? (i === 0 ? activeChat.isGroupChat ?? isGroupChat : false);
+
       if (i === 0) {
-        return { ...activeChat, contactName: s.contactName, messages, voiceMap };
+        return {
+          ...activeChat,
+          contactName: s.contactName,
+          messages,
+          voiceMap,
+          isGroupChat: resolvedGroup,
+        };
       }
       return {
         id: `chat_${Date.now()}_${i}`,
@@ -426,6 +434,7 @@ export default function ChatStoryGenerator() {
         script: "",
         messages,
         voiceMap,
+        isGroupChat: resolvedGroup,
       };
     });
 
