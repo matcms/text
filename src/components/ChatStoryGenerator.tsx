@@ -726,84 +726,156 @@ export default function ChatStoryGenerator() {
     setRecording(true);
     setExportProgress(0);
 
-    const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
-    exportProgressRef.current = { done: 0, total: totalMessages };
-
+    const FPS = 30;
     const SCALE = 2;
     const W = (target.offsetWidth || 400) * SCALE;
     const H = (target.offsetHeight || 711) * SCALE;
-    const canvas = document.createElement("canvas");
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext("2d")!;
+    const delayMs = Number(messageDelay) || 0;
 
-    const AC: typeof AudioContext =
-      (window as unknown as { AudioContext: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const audioCtx = new AC();
-    const audioDest = audioCtx.createMediaStreamDestination();
-    recordingCtxRef.current = { audioCtx, dest: audioDest };
+    const offCanvas = document.createElement("canvas");
+    offCanvas.width = W;
+    offCanvas.height = H;
+    const offCtx = offCanvas.getContext("2d")!;
 
-    const canvasStream = canvas.captureStream(30);
-    const combinedStream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...audioDest.stream.getAudioTracks(),
-    ]);
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType: "video/webm; codecs=vp8",
-      videoBitsPerSecond: 8_000_000,
-    });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
+    const audioSegments: { index: number; startMs: number; durationMs: number; blob: Blob }[] = [];
+    const frames: Uint8Array[] = [];
+    let currentTimeMs = 0;
+
+    const captureFramePng = async (): Promise<Uint8Array> => {
+      const snap = await toCanvas(target, {
+        pixelRatio: SCALE,
+        cacheBust: false,
+        skipFonts: true,
+        style: { transform: "scale(1)", transformOrigin: "top left" },
+      });
+      offCtx.clearRect(0, 0, W, H);
+      offCtx.drawImage(snap, 0, 0, W, H);
+      return new Promise<Uint8Array>((resolve) => {
+        offCanvas.toBlob((blob) => {
+          blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
+        }, "image/png");
+      });
     };
-    recorder.start();
 
-    let isCapturing = true;
-    let rafId: number | null = null;
-    const captureFrame = async () => {
-      if (!isCapturing || !previewRef.current) return;
-      try {
-        const tempCanvas = await toCanvas(previewRef.current, {
-          pixelRatio: SCALE,
-          cacheBust: true,
-          skipFonts: false,
-          style: { transform: "scale(1)", transformOrigin: "top left" },
-        });
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
-      } catch (e) {
-        console.warn("Frame drop", e);
-      }
-      if (isCapturing) rafId = requestAnimationFrame(captureFrame);
+    const holdFrameMs = async (ms: number) => {
+      if (ms <= 0) return;
+      const png = await captureFramePng();
+      const frameCount = Math.max(1, Math.round((ms / 1000) * FPS));
+      for (let i = 0; i < frameCount; i++) frames.push(png);
+      currentTimeMs += ms;
     };
-    rafId = requestAnimationFrame(captureFrame);
 
     try {
-      await playAnimation();
-    } finally {
-      isCapturing = false;
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      setTimeout(() => {
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: "video/webm" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
-          a.download = `${safeName}.webm`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          try { audioCtx.close(); } catch {}
-          recordingCtxRef.current = null;
-          exportProgressRef.current = null;
-          setRecording(false);
-          setExportProgress(0);
+      setExportProgress(2);
+
+      for (let c = 0; c < chats.length; c++) {
+        const chat = chats[c];
+        setPlayingChatId(chat.id);
+        setActiveChatId(chat.id);
+        const queue: Msg[] = [];
+        setVisibleMessages([]);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        for (let i = 0; i < chat.messages.length; i++) {
+          const msg = chat.messages[i];
+          queue.push(msg);
+          setVisibleMessages([...queue]);
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+          if (msg.type === "text" && msg.audioUrl) {
+            const audioDuration = await new Promise<number>((resolve) => {
+              const a = new Audio(msg.audioUrl!);
+              if (a.readyState >= 1) { resolve(a.duration * 1000); }
+              else {
+                a.addEventListener("loadedmetadata", () => resolve(a.duration * 1000), { once: true });
+                a.addEventListener("error", () => resolve(1500), { once: true });
+              }
+            });
+            const mp3Blob = await fetch(msg.audioUrl).then((r) => r.blob());
+            audioSegments.push({ index: audioSegments.length, startMs: currentTimeMs, durationMs: audioDuration, blob: mp3Blob });
+            await holdFrameMs(audioDuration + delayMs);
+          } else if (msg.type === "image") {
+            await holdFrameMs(2000 + delayMs);
+          } else {
+            await holdFrameMs(Math.max(300, delayMs));
+          }
+
+          const totalMsgs = chats.reduce((acc, ch) => acc + ch.messages.length, 0);
+          const doneSoFar = chats.slice(0, c).reduce((acc, ch) => acc + ch.messages.length, 0) + i + 1;
+          setExportProgress(2 + (doneSoFar / totalMsgs) * 58);
+        }
+      }
+
+      setPlayingChatId(null);
+      setVisibleMessages([]);
+      setExportProgress(62);
+
+      const worker = new Worker(
+        new URL("../workers/videoRenderer.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        worker.onmessage = (e) => { if (e.data.type === "ready") resolve(); };
+        worker.onerror = (e) => reject(new Error(e.message));
+        worker.postMessage({ type: "init" });
+      });
+
+      setExportProgress(65);
+
+      for (let i = 0; i < frames.length; i++) {
+        worker.postMessage({ type: "frame", png: frames[i], index: i }, [frames[i].buffer]);
+        if (i % 30 === 0) {
+          setExportProgress(65 + ((i / frames.length) * 15));
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      setExportProgress(80);
+
+      const segMeta: { index: number; startMs: number; durationMs: number }[] = [];
+      for (const seg of audioSegments) {
+        const buf = await seg.blob.arrayBuffer();
+        const mp3 = new Uint8Array(buf);
+        worker.postMessage({ type: "audio", mp3, index: seg.index }, [mp3.buffer]);
+        segMeta.push({ index: seg.index, startMs: seg.startMs, durationMs: seg.durationMs });
+      }
+
+      setExportProgress(83);
+
+      const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
+
+      const mp4 = await new Promise<Uint8Array>((resolve, reject) => {
+        worker.onmessage = (e) => {
+          if (e.data.type === "progress") setExportProgress(83 + (e.data.percent * 0.15));
+          else if (e.data.type === "done") resolve(e.data.mp4 as Uint8Array);
+          else if (e.data.type === "error") reject(new Error(e.data.message));
         };
-        recorder.stop();
-      }, 500);
+        worker.postMessage({ type: "render", fps: FPS, totalFrames: frames.length, audioSegments: segMeta, projectName: safeName });
+      });
+
+      worker.terminate();
+      setExportProgress(100);
+
+      const blob = new Blob([mp4], { type: "video/mp4" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      console.error("Erro ao renderizar vídeo:", err);
+      alert(`Erro ao gerar vídeo: ${String(err)}`);
+    } finally {
+      recordingCtxRef.current = null;
+      exportProgressRef.current = null;
+      setRecording(false);
+      setExportProgress(0);
+      setPlayingChatId(null);
+      setPlaying(false);
     }
   };
 
