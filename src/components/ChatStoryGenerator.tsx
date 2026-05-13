@@ -196,6 +196,7 @@ export default function ChatStoryGenerator() {
   const chatOuterRef = useRef<HTMLDivElement>(null);
   const chatInnerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const phoneRef = previewRef;
   const recordingCtxRef = useRef<{
     audioCtx: AudioContext;
     dest: MediaStreamAudioDestinationNode;
@@ -753,6 +754,10 @@ export default function ChatStoryGenerator() {
     }
     setRecording(true);
     setExportProgress(0);
+    exportProgressRef.current = {
+      done: 0,
+      total: chats.reduce((sum, chat) => sum + chat.messages.length, 0),
+    };
 
     const W = 1080;
     const H = 1920;
@@ -810,11 +815,12 @@ export default function ChatStoryGenerator() {
     let isCapturing = true;
     let isDrawing = false;
     const captureFrame = async () => {
-      if (!isCapturing || !previewRef.current) return;
+      if (!isCapturing || !phoneRef.current) return;
       if (!isDrawing) {
         isDrawing = true;
+        let tempCanvas: HTMLCanvasElement | null = null;
         try {
-          const tempCanvas = await toCanvas(previewRef.current, {
+          tempCanvas = await toCanvas(phoneRef.current, {
             pixelRatio: 2,
             cacheBust: false,
             skipFonts: false,
@@ -827,11 +833,13 @@ export default function ChatStoryGenerator() {
           });
           ctx.clearRect(0, 0, W, H);
           ctx.drawImage(tempCanvas, 0, 0, W, H);
-          tempCanvas.width = 0;
-          tempCanvas.height = 0;
         } catch (e) {
           console.warn("Frame drop", e);
         } finally {
+          if (tempCanvas) {
+            tempCanvas.width = 0;
+            tempCanvas.height = 0;
+          }
           isDrawing = false;
         }
       }
