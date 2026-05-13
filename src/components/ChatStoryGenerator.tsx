@@ -63,6 +63,7 @@ const newChat = (i: number): Chat => ({
   headerTime: "23",
   script: DEFAULT_SCRIPT,
   messages: [],
+  voiceMap: {},
 });
 
 // Convert base64 (mp3) to blob URL
