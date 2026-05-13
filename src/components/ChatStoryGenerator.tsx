@@ -952,6 +952,15 @@ export default function ChatStoryGenerator() {
                 const isLastSent =
                   m.side === "2" &&
                   !arr.slice(idx + 1).some((n) => n.side === "2");
+                const prev = arr[idx - 1];
+                const senderName = m.type === "text" ? m.voiceName : "";
+                const showName =
+                  isGroupChat &&
+                  m.side === "1" &&
+                  m.type === "text" &&
+                  (idx === 0 ||
+                    prev?.side === "2" ||
+                    (prev?.type === "text" && prev.voiceName !== m.voiceName));
                 return (
                 <motion.div
                   key={m.id}
@@ -961,6 +970,11 @@ export default function ChatStoryGenerator() {
                     m.side === "2" ? "items-end" : "items-start"
                   }`}
                 >
+                  {!isWA && showName && (
+                    <span className="text-[11px] text-[#8e8e93] mb-0.5 ml-3 capitalize block">
+                      {senderName}
+                    </span>
+                  )}
                   {m.type === "text" ? (
                     isWA ? (
                       <div
@@ -970,6 +984,11 @@ export default function ChatStoryGenerator() {
                             : "bg-[#262d31] rounded-lg rounded-tl-none wa-tail-left"
                         }`}
                       >
+                        {showName && (
+                          <span className="text-[13px] font-bold text-[#53bdeb] mb-0.5 capitalize block">
+                            {senderName}
+                          </span>
+                        )}
                         {m.text}
                       </div>
                     ) : (
