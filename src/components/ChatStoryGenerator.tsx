@@ -41,11 +41,24 @@ import {
   X,
   User,
   Users,
+  Save,
+  Trash2,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  saveProject,
+  listProjects,
+  deleteProject,
+  urlToBlob,
+  type StoredProject,
+  type StoredChat,
+  type StoredMsg,
+} from "@/lib/projects-db";
 
 type TextMsg = {
   id: number;
