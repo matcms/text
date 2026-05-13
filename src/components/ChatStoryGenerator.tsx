@@ -679,7 +679,8 @@ export default function ChatStoryGenerator() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `chat-story-${Date.now()}.${ext}`;
+      const safeName = (projectName.trim() || "video").replace(/[^a-z0-9-_]+/gi, "_");
+      a.download = `${safeName}.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
