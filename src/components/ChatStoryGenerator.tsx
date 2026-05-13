@@ -44,6 +44,7 @@ type Chat = {
   headerTime: string;
   script: string;
   messages: Msg[];
+  voiceMap: Record<string, string>;
 };
 
 type ChatTheme = "imessage" | "whatsapp";
