@@ -362,6 +362,9 @@ export default function ChatStoryGenerator() {
           const audio = new Audio(msg.audioUrl);
           audio.play();
           await new Promise((r) => (audio.onended = () => r(null)));
+          if (Number(messageDelay) > 0) {
+            await new Promise((r) => setTimeout(r, Number(messageDelay)));
+          }
         }
         if (msg.type === "image") {
           await new Promise((r) => setTimeout(r, 2000));
