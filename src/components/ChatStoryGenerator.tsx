@@ -764,13 +764,17 @@ export default function ChatStoryGenerator() {
             }
           >
             <AnimatePresence>
-              {(playing ? visibleMessages : displayChat.messages).map((m) => (
+              {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
+                const isLastSent =
+                  m.side === "2" &&
+                  !arr.slice(idx + 1).some((n) => n.side === "2");
+                return (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${isWA ? "mb-1.5" : "mb-1"} ${
-                    m.side === "2" ? "justify-end" : "justify-start"
+                  className={`flex flex-col ${isWA ? "mb-1.5" : "mb-1"} ${
+                    m.side === "2" ? "items-end" : "items-start"
                   }`}
                 >
                   {m.type === "text" ? (
@@ -786,10 +790,10 @@ export default function ChatStoryGenerator() {
                       </div>
                     ) : (
                       <div
-                        className={`max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${
+                        className={`relative max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${
                           m.side === "2"
-                            ? "bg-[#0A84FF] rounded-2xl rounded-br-sm"
-                            : "bg-[#262628] rounded-2xl rounded-bl-sm"
+                            ? "bg-[#0A84FF] rounded-2xl im-tail-right"
+                            : "bg-[#262628] rounded-2xl"
                         }`}
                       >
                         {m.text}
@@ -823,8 +827,11 @@ export default function ChatStoryGenerator() {
                       <span className="text-center">{m.text}</span>
                     </div>
                   )}
+                  {!isWA && isLastSent && (
+                    <span className="text-[#8e8e93] text-[11px] mt-0.5 mr-1">Entregue</span>
+                  )}
                 </motion.div>
-              ))}
+              );})}
             </AnimatePresence>
           </div>
         </div>
