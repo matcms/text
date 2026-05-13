@@ -154,6 +154,9 @@ export default function ChatStoryGenerator() {
   const [visibleMessages, setVisibleMessages] = useState<Msg[]>([]);
   const [playing, setPlaying] = useState(false);
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   
   const [messageDelay, setMessageDelay] = useState(0);
