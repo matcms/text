@@ -381,7 +381,7 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const pauseMs = Math.max(0, Math.round(messagePauseSec * 1000));
+    const pauseMs = Math.max(0, Number(messageDelay) || 0);
 
     const scrollDown = () => {
       const el = chatScrollRef.current;
