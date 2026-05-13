@@ -1,3 +1,4 @@
+/// <reference lib="webworker" />
 /**
  * Web Worker responsável por montar o vídeo final usando FFmpeg.wasm.
  * Roda em thread separada — não trava a UI em momento algum.
@@ -5,6 +6,8 @@
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
+
+declare const self: DedicatedWorkerGlobalScope;
 
 let ffmpeg: FFmpeg | null = null;
 
