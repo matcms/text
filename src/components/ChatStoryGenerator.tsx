@@ -92,7 +92,22 @@ type Chat = {
   messages: Msg[];
   voiceMap: Record<string, string>;
   isGroupChat?: boolean;
+  groupSubtitle?: string;
+  nameColors?: Record<string, string>;
 };
+
+const NAME_COLOR_OPTIONS: { label: string; value: string }[] = [
+  { label: "Padrão", value: "" },
+  { label: "Roxo", value: "#a855f7" },
+  { label: "Laranja", value: "#f97316" },
+  { label: "Azul", value: "#53bdeb" },
+  { label: "Vermelho", value: "#ef4444" },
+  { label: "Rosa", value: "#ec4899" },
+  { label: "Marrom", value: "#92400e" },
+  { label: "Verde claro", value: "#4ade80" },
+  { label: "Verde escuro", value: "#15803d" },
+  { label: "Amarelo", value: "#facc15" },
+];
 
 type ChatTheme = "imessage" | "whatsapp";
 
