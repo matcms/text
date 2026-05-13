@@ -496,11 +496,15 @@ export default function ChatStoryGenerator() {
       ...dest.stream.getAudioTracks(),
     ]);
     const mimeCandidates = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1,mp4a",
+      "video/mp4",
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
       "video/webm",
     ];
     const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const isMp4 = mime.startsWith("video/mp4");
     const recorder = new MediaRecorder(combined, { mimeType: mime });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
