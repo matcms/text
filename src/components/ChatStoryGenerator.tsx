@@ -736,6 +736,7 @@ export default function ChatStoryGenerator() {
     : activeChat;
 
   const isWA = chatTheme === "whatsapp";
+  const effectiveGroupChat = displayChat.isGroupChat ?? isGroupChat;
 
   return (
     <Tabs
