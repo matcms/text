@@ -471,7 +471,83 @@ export default function ChatStoryGenerator() {
     setPlaying(false);
   };
 
-  const addChat = () => {
+  const recordVideo = async () => {
+    const target = previewRef.current;
+    if (!target) return;
+    if (!allAudiosReady) {
+      alert("Gere os áudios primeiro.");
+      return;
+    }
+    setRecording(true);
+    const W = target.offsetWidth;
+    const H = target.offsetHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+    recordingCtxRef.current = { audioCtx, dest };
+
+    const videoStream = canvas.captureStream(30);
+    const combined = new MediaStream([
+      ...videoStream.getVideoTracks(),
+      ...dest.stream.getAudioTracks(),
+    ]);
+    const mimeCandidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const recorder = new MediaRecorder(combined, { mimeType: mime });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.start(100);
+
+    let drawing = true;
+    const drawLoop = async () => {
+      while (drawing) {
+        try {
+          const snap = await html2canvas(target, {
+            backgroundColor: null,
+            scale: 1,
+            logging: false,
+            useCORS: true,
+          });
+          ctx.drawImage(snap, 0, 0, W, H);
+        } catch (err) {
+          console.error(err);
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    };
+    drawLoop();
+
+    try {
+      await playAnimation();
+    } finally {
+      drawing = false;
+      await new Promise((r) => setTimeout(r, 400));
+      recorder.stop();
+      await new Promise((r) => (recorder.onstop = () => r(null)));
+      try { audioCtx.close(); } catch {}
+      recordingCtxRef.current = null;
+
+      const blob = new Blob(chunks, { type: "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chat-story-${Date.now()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setRecording(false);
+    }
+  };
+
     const next = newChat(chats.length + 1);
     setChats((p) => [...p, next]);
     setActiveChatId(next.id);
