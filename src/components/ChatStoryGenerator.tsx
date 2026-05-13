@@ -1467,14 +1467,16 @@ export default function ChatStoryGenerator() {
                   m.side === "2" &&
                   !arr.slice(idx + 1).some((n) => n.side === "2");
                 const prev = arr[idx - 1];
-                const senderName = m.type === "text" ? m.voiceName : "";
+                const senderName = m.type === "text" ? (m.displayName || m.voiceName) : "";
+                const prevSenderName =
+                  prev?.type === "text" ? (prev.displayName || prev.voiceName) : "";
                 const showName =
                   effectiveGroupChat &&
                   m.side === "1" &&
                   m.type === "text" &&
                   (idx === 0 ||
                     prev?.side === "2" ||
-                    (prev?.type === "text" && prev.voiceName !== m.voiceName));
+                    (prev?.type === "text" && prevSenderName !== senderName));
                 return (
                 <motion.div
                   key={m.id}
