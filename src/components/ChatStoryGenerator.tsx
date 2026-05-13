@@ -660,34 +660,29 @@ export default function ChatStoryGenerator() {
     setGenerating(false);
   };
 
-  const playAnimation = async () => {
+  const playAnimation = async (onFrameReady?: () => Promise<void>) => {
     setPlaying(true);
-    setExportScroll(0);
-
-    const applyVirtualScroll = () => {
-      if (chatOuterRef.current && chatInnerRef.current) {
-        const outerHeight = chatOuterRef.current.clientHeight;
-        const innerHeight = chatInnerRef.current.scrollHeight;
-        setExportScroll(innerHeight > outerHeight ? innerHeight - outerHeight : 0);
-      }
+    const delayMs = Number(messageDelay) || 0;
+    const scrollDown = () => {
+      const el = chatScrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     };
-
     for (let c = 0; c < chats.length; c++) {
       const chat = chats[c];
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
-      setExportScroll(0);
-      await new Promise((r) => setTimeout(r, 100));
-
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      if (onFrameReady) await onFrameReady();
+      const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
-
-        setVisibleMessages((prev) => [...prev, msg]);
-        await new Promise((r) => setTimeout(r, 100));
-        applyVirtualScroll();
-        await new Promise((r) => setTimeout(r, 200));
-
+        queue.push(msg);
+        setVisibleMessages([...queue]);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        scrollDown();
+        // Captura o frame ANTES de tocar o áudio
+        if (onFrameReady) await onFrameReady();
         if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
@@ -700,33 +695,12 @@ export default function ChatStoryGenerator() {
               console.error("audio routing failed", err);
             }
           }
-
-          // Workaround for Chrome's Infinity duration bug on Blob URLs
           await new Promise<void>((resolve) => {
-            const onReady = () => {
-              if (!isFinite(audio.duration) || isNaN(audio.duration)) {
-                audio.currentTime = 1e101;
-                audio.addEventListener(
-                  "timeupdate",
-                  () => {
-                    audio.currentTime = 0;
-                    resolve();
-                  },
-                  { once: true },
-                );
-              } else {
-                resolve();
-              }
-            };
-            audio.addEventListener("loadedmetadata", onReady, { once: true });
-            if (audio.readyState >= 1) onReady();
+            if (audio.readyState >= 1) resolve();
+            else audio.addEventListener("loadedmetadata", () => resolve(), { once: true });
           });
-
           audio.play().catch((err) => console.error("audio play failed", err));
-
-          const delayMs = Number(messageDelay) || 0;
-          let durationMs = (audio.duration || 0) * 1000;
-          if (!isFinite(durationMs) || durationMs <= 0) durationMs = 2000;
+          const durationMs = (audio.duration || 0) * 1000;
           const waitTime = Math.max(0, durationMs + delayMs);
           await new Promise((r) => setTimeout(r, waitTime));
         }
@@ -742,7 +716,6 @@ export default function ChatStoryGenerator() {
     }
     setPlayingChatId(null);
     setPlaying(false);
-    setExportScroll(0);
   };
 
   const recordVideo = async () => {
@@ -754,26 +727,23 @@ export default function ChatStoryGenerator() {
     }
     setRecording(true);
     setExportProgress(0);
-    exportProgressRef.current = {
-      done: 0,
-      total: chats.reduce((sum, chat) => sum + chat.messages.length, 0),
-    };
+    const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
+    exportProgressRef.current = { done: 0, total: totalMessages };
 
-    const W = 1080;
-    const H = 1920;
+    const SCALE = 2;
+    const W = (target.offsetWidth || 400) * SCALE;
+    const H = (target.offsetHeight || 711) * SCALE;
 
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext("2d")!;
 
-    const AC =
-      (window as any).AudioContext || (window as any).webkitAudioContext;
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
     const audioCtx = new AC();
     const audioDest = audioCtx.createMediaStreamDestination();
     recordingCtxRef.current = { audioCtx, dest: audioDest };
 
-    // Detecta o melhor formato suportado pelo browser
     const FORMATS = [
       { mime: "video/mp4; codecs=avc1.42E01E,mp4a.40.2", ext: "mp4" },
       { mime: "video/mp4; codecs=avc1",                  ext: "mp4" },
@@ -786,8 +756,6 @@ export default function ChatStoryGenerator() {
     const chosen = FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime));
     if (!chosen) {
       alert("Seu navegador não suporta gravação de vídeo. Use o Chrome.");
-      try { audioCtx.close(); } catch {}
-      recordingCtxRef.current = null;
       setRecording(false);
       return;
     }
@@ -811,50 +779,28 @@ export default function ChatStoryGenerator() {
 
     recorder.start(100);
 
-    // Throttled capture loop (~15fps) with lock and manual canvas cleanup
-    let isCapturing = true;
-    let isDrawing = false;
+    // Callback sincronizado: captura o frame atual e aguarda antes de continuar
     const captureFrame = async () => {
-      if (!isCapturing || !phoneRef.current) return;
-      if (!isDrawing) {
-        isDrawing = true;
-        let tempCanvas: HTMLCanvasElement | null = null;
-        try {
-          tempCanvas = await toCanvas(phoneRef.current, {
-            pixelRatio: 2,
-            cacheBust: false,
-            skipFonts: false,
-            style: {
-              transform: "scale(1)",
-              transformOrigin: "top left",
-              margin: "0",
-              borderRadius: "0",
-            },
-          });
-          ctx.clearRect(0, 0, W, H);
-          ctx.drawImage(tempCanvas, 0, 0, W, H);
-        } catch (e) {
-          console.warn("Frame drop", e);
-        } finally {
-          if (tempCanvas) {
-            tempCanvas.width = 0;
-            tempCanvas.height = 0;
-          }
-          isDrawing = false;
-        }
-      }
-      if (isCapturing) {
-        setTimeout(captureFrame, 66);
+      if (!previewRef.current) return;
+      try {
+        const snap = await toCanvas(previewRef.current, {
+          pixelRatio: SCALE,
+          cacheBust: false,
+          skipFonts: true,
+          style: { transform: "scale(1)", transformOrigin: "top left" },
+        });
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(snap, 0, 0, W, H);
+      } catch (e) {
+        console.warn("Frame drop", e);
       }
     };
-    setTimeout(captureFrame, 66);
 
     try {
-      await playAnimation();
+      await playAnimation(captureFrame);
     } finally {
-      isCapturing = false;
-
-      // Aguarda último frame ser desenhado
+      // Captura frame final e aguarda gravar
+      await captureFrame();
       await new Promise<void>((r) => setTimeout(r, 500));
 
       await new Promise<void>((resolve) => {
@@ -884,7 +830,6 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
 
       exportProgressRef.current = null;
-      setExportScroll(0);
       setRecording(false);
       setExportProgress(0);
     }
