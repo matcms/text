@@ -1519,7 +1519,7 @@ export default function ChatStoryGenerator() {
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
-        <div className="relative" style={{ width: 400, height: 711 }}>
+        <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
           className="aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl bg-black"
@@ -1601,21 +1601,30 @@ export default function ChatStoryGenerator() {
 
           {/* Chat */}
           <div
-            ref={chatScrollRef}
-            className={`flex-1 w-full p-3 overflow-y-auto scroll-smooth ${
-              isWA ? "bg-[#0b141a]" : "bg-black"
-            }`}
-            style={
-              isWA
+            ref={(el) => {
+              chatOuterRef.current = el;
+              chatScrollRef.current = el;
+            }}
+            className="flex-1 w-full overflow-hidden relative"
+            style={{
+              backgroundColor: isWA ? "#0b141a" : "#000000",
+              ...(isWA
                 ? {
-                    scrollbarWidth: "none",
                     backgroundImage:
                       "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
                     backgroundRepeat: "repeat",
                   }
-                : { scrollbarWidth: "none" }
-            }
+                : {}),
+            }}
           >
+            <div
+              ref={chatInnerRef}
+              className="absolute top-0 left-0 w-full flex flex-col justify-end min-h-full pb-6"
+              style={{
+                transform: `translateY(-${exportScroll}px)`,
+                transition: recording ? "transform 0.15s ease-out" : "none",
+              }}
+            >
             <AnimatePresence>
               {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
                 const isLastSent =
