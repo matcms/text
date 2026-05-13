@@ -166,3 +166,26 @@
   border-width: 0 8px 8px 0;
   border-color: transparent #262d31 transparent transparent;
 }
+
+/* iMessage blue bubble tail */
+.im-tail-right::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: -6px;
+  width: 14px;
+  height: 18px;
+  background: #0A84FF;
+  border-bottom-left-radius: 14px 12px;
+  z-index: -1;
+}
+.im-tail-right::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: -10px;
+  width: 10px;
+  height: 18px;
+  background: #000;
+  border-bottom-left-radius: 10px;
+}
