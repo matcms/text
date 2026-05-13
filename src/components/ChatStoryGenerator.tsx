@@ -35,6 +35,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Play,
+  Pause,
   Upload,
   Link2,
   ClipboardPaste,
