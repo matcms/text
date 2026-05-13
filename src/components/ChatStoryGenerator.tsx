@@ -219,8 +219,7 @@ export default function ChatStoryGenerator() {
   };
 
   const ttsElevenLabs = async (text: string, voiceName: string): Promise<string> => {
-    const voices = await fetchElevenVoices();
-    const voiceId = voices[voiceName.toLowerCase()] || voiceName;
+    const voiceId = voiceName.trim();
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {
