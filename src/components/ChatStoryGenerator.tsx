@@ -444,7 +444,7 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const pauseMs = Math.max(0, Number(messageDelay) || 0);
+    const delayMs = Number(messageDelay) || 0;
 
     const scrollDown = () => {
       const el = chatScrollRef.current;
@@ -456,9 +456,6 @@ export default function ChatStoryGenerator() {
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
-      if (c > 0 && pauseMs > 0) {
-        await new Promise((r) => setTimeout(r, pauseMs));
-      }
 
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
@@ -470,30 +467,32 @@ export default function ChatStoryGenerator() {
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
+          const audio = new Audio(msg.audioUrl);
           if (rec) {
-            // route audio through MediaStreamDestination so MediaRecorder captures it
-            const buf = await fetch(msg.audioUrl).then((r) => r.arrayBuffer());
-            const audioBuf = await rec.audioCtx.decodeAudioData(buf.slice(0));
-            const src = rec.audioCtx.createBufferSource();
-            src.buffer = audioBuf;
-            src.connect(rec.dest);
-            src.connect(rec.audioCtx.destination);
-            src.start();
-            await new Promise((r) => (src.onended = () => r(null)));
-          } else {
-            const audio = new Audio(msg.audioUrl);
-            audio.play();
-            await new Promise((r) => (audio.onended = () => r(null)));
+            try {
+              const src = rec.audioCtx.createMediaElementSource(audio);
+              src.connect(rec.dest);
+              src.connect(rec.audioCtx.destination);
+            } catch (err) {
+              console.error("audio routing failed", err);
+            }
           }
-          if (Number(messageDelay) > 0) {
-            await new Promise((r) => setTimeout(r, Number(messageDelay)));
-          }
+          await new Promise<void>((resolve) => {
+            if (audio.readyState >= 1) resolve();
+            else
+              audio.addEventListener("loadedmetadata", () => resolve(), {
+                once: true,
+              });
+          });
+          audio.play().catch((err) => console.error("audio play failed", err));
+          const durationMs = (audio.duration || 0) * 1000;
+          // Negative delay overlaps next message into the tail of the audio.
+          const waitTime = Math.max(0, durationMs + delayMs);
+          await new Promise((r) => setTimeout(r, waitTime));
+          // Do NOT stop the audio: it keeps playing while the next message appears.
         }
         if (msg.type === "image") {
           await new Promise((r) => setTimeout(r, 2000));
-        }
-        if (i < chat.messages.length - 1 && pauseMs > 0) {
-          await new Promise((r) => setTimeout(r, pauseMs));
         }
       }
     }
