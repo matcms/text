@@ -90,7 +90,7 @@ export default function ChatStoryGenerator() {
   const [playing, setPlaying] = useState(false);
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
 
-  const [messagePauseSec, setMessagePauseSec] = useState(0.3);
+  
   const [messageDelay, setMessageDelay] = useState(0);
   const [isGroupChat, setIsGroupChat] = useState(false);
 
@@ -161,47 +161,93 @@ export default function ChatStoryGenerator() {
 
   const parseScript = () => {
     const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
-    const parsed: Msg[] = [];
-    let id = 0;
-    let header = activeChat.contactName;
+
+    type Seg = { theme: ChatTheme; contactName: string; lines: string[] };
+    const segs: Seg[] = [];
+    let cur: Seg | null = null;
+
     for (const line of lines) {
       const headerMatch = line.match(/^-\s*(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i);
       if (headerMatch) {
         const kind = headerMatch[1].toLowerCase();
-        header = headerMatch[2].trim();
-        if (kind === "imessage") setChatTheme("imessage");
-        else if (kind === "whatsapp") setChatTheme("whatsapp");
+        const name = headerMatch[2].trim();
+        const theme: ChatTheme =
+          kind === "whatsapp" ? "whatsapp" : kind === "imessage" ? "imessage" : chatTheme;
+        cur = { theme, contactName: name, lines: [] };
+        segs.push(cur);
         continue;
       }
-      const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
-      if (imgMatch) {
-        parsed.push({
-          id: id++,
-          side: imgMatch[1],
-          type: "image",
-          text: imgMatch[2],
-          imageUrl: null,
-        });
-        continue;
+      if (!cur) {
+        cur = { theme: chatTheme, contactName: activeChat.contactName, lines: [] };
+        segs.push(cur);
       }
-      const textMatch = line.match(/^(\d):\s*(.+?)>\s*(.*)$/);
-      if (textMatch) {
-        parsed.push({
-          id: id++,
-          side: textMatch[1],
-          type: "text",
-          voiceName: textMatch[2].trim(),
-          text: textMatch[3],
-          audioUrl: null,
-        });
-      }
+      cur.lines.push(line);
     }
-    const uniqueNames = Array.from(
-      new Set(parsed.filter((m): m is TextMsg => m.type === "text").map((m) => m.voiceName))
-    );
-    const newMap: Record<string, string> = {};
-    for (const n of uniqueNames) newMap[n] = activeChat.voiceMap[n] || "";
-    updateActiveChat({ contactName: header, messages: parsed, voiceMap: newMap });
+
+    if (segs.length === 0) {
+      updateActiveChat({ messages: [], voiceMap: {} });
+      setVisibleMessages([]);
+      return;
+    }
+
+    const buildMessages = (segLines: string[]): Msg[] => {
+      const parsed: Msg[] = [];
+      let id = 0;
+      for (const line of segLines) {
+        const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
+        if (imgMatch) {
+          parsed.push({
+            id: id++,
+            side: imgMatch[1],
+            type: "image",
+            text: imgMatch[2],
+            imageUrl: null,
+          });
+          continue;
+        }
+        const textMatch = line.match(/^(\d):\s*(.+?)>\s*(.*)$/);
+        if (textMatch) {
+          parsed.push({
+            id: id++,
+            side: textMatch[1],
+            type: "text",
+            voiceName: textMatch[2].trim(),
+            text: textMatch[3],
+            audioUrl: null,
+          });
+        }
+      }
+      return parsed;
+    };
+
+    setChatTheme(segs[0].theme);
+
+    const newChats: Chat[] = segs.map((s, i) => {
+      const messages = buildMessages(s.lines);
+      const uniqueNames = Array.from(
+        new Set(messages.filter((m): m is TextMsg => m.type === "text").map((m) => m.voiceName))
+      );
+      const baseMap = i === 0 ? activeChat.voiceMap : {};
+      const voiceMap: Record<string, string> = {};
+      for (const n of uniqueNames) voiceMap[n] = baseMap[n] || "";
+
+      if (i === 0) {
+        return { ...activeChat, contactName: s.contactName, messages, voiceMap };
+      }
+      return {
+        id: `chat_${Date.now()}_${i}`,
+        name: `Chat ${i + 1}`,
+        contactName: s.contactName,
+        contactPhoto: null,
+        headerTime: "23",
+        script: "",
+        messages,
+        voiceMap,
+      };
+    });
+
+    setChats(newChats);
+    setActiveChatId(newChats[0].id);
     setVisibleMessages([]);
   };
 
@@ -335,7 +381,7 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const pauseMs = Math.max(0, Math.round(messagePauseSec * 1000));
+    const pauseMs = Math.max(0, Number(messageDelay) || 0);
 
     const scrollDown = () => {
       const el = chatScrollRef.current;
@@ -722,30 +768,6 @@ export default function ChatStoryGenerator() {
             })}
           </div>
         )}
-
-        {/* Pause control */}
-        <div className="space-y-2 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <Label>Pausa entre mensagens (segundos)</Label>
-            <span className="text-xs text-muted-foreground">{messagePauseSec.toFixed(2)}s</span>
-          </div>
-          <Input
-            type="number"
-            step={0.05}
-            min={0}
-            value={messagePauseSec}
-            onChange={(e) => setMessagePauseSec(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0.3"
-          />
-          <div className="flex gap-2 pt-1 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0)}>0s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.1)}>0.1s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.3)}>0.3s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.6)}>0.6s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(1)}>1s</Button>
-          </div>
-        </div>
-
 
         <Button
           onClick={generateAudios}
