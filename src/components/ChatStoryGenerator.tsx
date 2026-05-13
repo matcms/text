@@ -192,7 +192,112 @@ export default function ChatStoryGenerator() {
     refreshProjects();
   }, []);
 
-  // Persist keys
+  const handleSaveProject = async () => {
+    const name = projectName.trim();
+    if (!name) {
+      alert("Informe um nome para o projeto.");
+      return;
+    }
+    setSavingProject(true);
+    try {
+      const storedChats: StoredChat[] = [];
+      for (const c of chats) {
+        const messages: StoredMsg[] = [];
+        for (const m of c.messages) {
+          if (m.type === "text") {
+            messages.push({
+              id: m.id,
+              side: m.side,
+              type: "text",
+              voiceName: m.voiceName,
+              text: m.text,
+              audioBlob: await urlToBlob(m.audioUrl),
+            });
+          } else {
+            messages.push({
+              id: m.id,
+              side: m.side,
+              type: "image",
+              text: m.text,
+              imageBlob: await urlToBlob(m.imageUrl),
+            });
+          }
+        }
+        storedChats.push({
+          id: c.id,
+          name: c.name,
+          contactName: c.contactName,
+          contactPhotoBlob: await urlToBlob(c.contactPhoto),
+          headerTime: c.headerTime,
+          script: c.script,
+          messages,
+          voiceMap: c.voiceMap,
+        });
+      }
+      const project: StoredProject = {
+        id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        projectName: name,
+        theme: chatTheme,
+        isGroupChat,
+        messageDelay,
+        chats: storedChats,
+        createdAt: Date.now(),
+      };
+      await saveProject(project);
+      await refreshProjects();
+      alert("Projeto salvo!");
+    } catch (e) {
+      console.error(e);
+      alert("Falha ao salvar projeto: " + (e as Error).message);
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleLoadProject = (p: StoredProject) => {
+    const loadedChats: Chat[] = p.chats.map((c) => ({
+      id: c.id,
+      name: c.name,
+      contactName: c.contactName,
+      contactPhoto: c.contactPhotoBlob ? URL.createObjectURL(c.contactPhotoBlob) : null,
+      headerTime: c.headerTime,
+      script: c.script,
+      voiceMap: c.voiceMap,
+      messages: c.messages.map((m) =>
+        m.type === "text"
+          ? {
+              id: m.id,
+              side: m.side,
+              type: "text",
+              voiceName: m.voiceName,
+              text: m.text,
+              audioUrl: m.audioBlob ? URL.createObjectURL(m.audioBlob) : null,
+            }
+          : {
+              id: m.id,
+              side: m.side,
+              type: "image",
+              text: m.text,
+              imageUrl: m.imageBlob ? URL.createObjectURL(m.imageBlob) : null,
+            }
+      ),
+    }));
+    setChats(loadedChats);
+    setActiveChatId(loadedChats[0]?.id || "");
+    setChatTheme(p.theme);
+    setIsGroupChat(p.isGroupChat);
+    setMessageDelay(p.messageDelay);
+    setProjectName(p.projectName);
+    setVisibleMessages([]);
+    setActiveTab("editor");
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    if (!confirm("Excluir este projeto?")) return;
+    await deleteProject(id);
+    await refreshProjects();
+  };
+
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
