@@ -273,8 +273,15 @@ export default function ChatStoryGenerator() {
     chats.forEach((c) => (chatMessagesMap[c.id] = [...c.messages]));
 
     for (const { chatId, msg } of allTexts) {
+      const chat = chats.find((c) => c.id === chatId)!;
+      const voiceId = (chat.voiceMap[msg.voiceName] || "").trim();
+      if (!voiceId) {
+        alert(`Defina o Voice ID para "${msg.voiceName}" no chat "${chat.name}".`);
+        setGenerating(false);
+        return;
+      }
       try {
-        const audioUrl = await ttsElevenLabs(msg.text, msg.voiceName);
+        const audioUrl = await ttsElevenLabs(msg.text, voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
