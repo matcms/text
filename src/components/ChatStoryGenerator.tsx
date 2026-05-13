@@ -249,7 +249,7 @@ export default function ChatStoryGenerator() {
       return;
     }
 
-    elevenVoicesRef.current = null; // force refresh
+    
 
     const allTexts = chats.flatMap((c) =>
       c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
