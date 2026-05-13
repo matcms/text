@@ -818,15 +818,21 @@ export default function ChatStoryGenerator() {
             <div className="flex gap-2 flex-wrap">
               <Button
                 size="sm"
-                variant={!isGroupChat ? "default" : "outline"}
-                onClick={() => setIsGroupChat(false)}
+                variant={!effectiveGroupChat ? "default" : "outline"}
+                onClick={() => {
+                  setIsGroupChat(false);
+                  updateActiveChat({ isGroupChat: false });
+                }}
               >
                 Direct Message
               </Button>
               <Button
                 size="sm"
-                variant={isGroupChat ? "default" : "outline"}
-                onClick={() => setIsGroupChat(true)}
+                variant={effectiveGroupChat ? "default" : "outline"}
+                onClick={() => {
+                  setIsGroupChat(true);
+                  updateActiveChat({ isGroupChat: true });
+                }}
               >
                 Group Chat
               </Button>
