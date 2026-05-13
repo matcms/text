@@ -781,6 +781,8 @@ export default function ChatStoryGenerator() {
     const chosen = FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime));
     if (!chosen) {
       alert("Seu navegador não suporta gravação de vídeo. Use o Chrome.");
+      try { audioCtx.close(); } catch {}
+      recordingCtxRef.current = null;
       setRecording(false);
       return;
     }
@@ -804,7 +806,7 @@ export default function ChatStoryGenerator() {
 
     recorder.start(100);
 
-    // Throttled capture loop (~20fps) with lock so React keeps CPU to scroll
+    // Throttled capture loop (~15fps) with lock and manual canvas cleanup
     let isCapturing = true;
     let isDrawing = false;
     const captureFrame = async () => {
@@ -825,16 +827,19 @@ export default function ChatStoryGenerator() {
           });
           ctx.clearRect(0, 0, W, H);
           ctx.drawImage(tempCanvas, 0, 0, W, H);
+          tempCanvas.width = 0;
+          tempCanvas.height = 0;
         } catch (e) {
           console.warn("Frame drop", e);
+        } finally {
+          isDrawing = false;
         }
-        isDrawing = false;
       }
       if (isCapturing) {
-        requestAnimationFrame(() => setTimeout(captureFrame, 50));
+        setTimeout(captureFrame, 66);
       }
     };
-    requestAnimationFrame(captureFrame);
+    setTimeout(captureFrame, 66);
 
     try {
       await playAnimation();
@@ -871,6 +876,7 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
 
       exportProgressRef.current = null;
+      setExportScroll(0);
       setRecording(false);
       setExportProgress(0);
     }
