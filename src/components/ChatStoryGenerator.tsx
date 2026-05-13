@@ -193,13 +193,17 @@ export default function ChatStoryGenerator() {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatOuterRef = useRef<HTMLDivElement | null>(null);
+  const chatInnerRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const phoneRef = previewRef;
   const recordingCtxRef = useRef<{
     audioCtx: AudioContext;
     dest: MediaStreamAudioDestinationNode;
   } | null>(null);
   const [recording, setRecording] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportScroll, setExportScroll] = useState(0);
   const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
 
   // Projects (IndexedDB)
@@ -658,11 +662,14 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const delayMs = Number(messageDelay) || 0;
+    setExportScroll(0);
 
-    const scrollDown = () => {
-      const el = chatScrollRef.current;
-      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const applyVirtualScroll = () => {
+      if (chatOuterRef.current && chatInnerRef.current) {
+        const outerHeight = chatOuterRef.current.clientHeight;
+        const innerHeight = chatInnerRef.current.scrollHeight;
+        setExportScroll(innerHeight > outerHeight ? innerHeight - outerHeight : 0);
+      }
     };
 
     for (let c = 0; c < chats.length; c++) {
@@ -670,21 +677,18 @@ export default function ChatStoryGenerator() {
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
+      setExportScroll(0);
+      await new Promise((r) => setTimeout(r, 100));
 
-      const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
 
-        queue.push(msg);
-        setVisibleMessages([...queue]);
-        await new Promise((r) => requestAnimationFrame(() => r(null)));
-        scrollDown();
-        if (msg.type === "text" && msg.audioUrl) {
-          // Yield to React so DOM updates and auto-scroll happens BEFORE audio
-          await new Promise((r) => setTimeout(r, 100));
-          scrollDown();
-          await new Promise((r) => setTimeout(r, 100));
+        setVisibleMessages((prev) => [...prev, msg]);
+        await new Promise((r) => setTimeout(r, 100));
+        applyVirtualScroll();
+        await new Promise((r) => setTimeout(r, 200));
 
+        if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
           if (rec) {
@@ -720,6 +724,7 @@ export default function ChatStoryGenerator() {
 
           audio.play().catch((err) => console.error("audio play failed", err));
 
+          const delayMs = Number(messageDelay) || 0;
           let durationMs = (audio.duration || 0) * 1000;
           if (!isFinite(durationMs) || durationMs <= 0) durationMs = 2000;
           const waitTime = Math.max(0, durationMs + delayMs);
@@ -737,6 +742,7 @@ export default function ChatStoryGenerator() {
     }
     setPlayingChatId(null);
     setPlaying(false);
+    setExportScroll(0);
   };
 
   const recordVideo = async () => {
@@ -748,6 +754,10 @@ export default function ChatStoryGenerator() {
     }
     setRecording(true);
     setExportProgress(0);
+    exportProgressRef.current = {
+      done: 0,
+      total: chats.reduce((sum, chat) => sum + chat.messages.length, 0),
+    };
 
     const W = 1080;
     const H = 1920;
@@ -776,6 +786,8 @@ export default function ChatStoryGenerator() {
     const chosen = FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime));
     if (!chosen) {
       alert("Seu navegador não suporta gravação de vídeo. Use o Chrome.");
+      try { audioCtx.close(); } catch {}
+      recordingCtxRef.current = null;
       setRecording(false);
       return;
     }
@@ -799,15 +811,16 @@ export default function ChatStoryGenerator() {
 
     recorder.start(100);
 
-    // Throttled capture loop (~20fps) with lock so React keeps CPU to scroll
+    // Throttled capture loop (~15fps) with lock and manual canvas cleanup
     let isCapturing = true;
     let isDrawing = false;
     const captureFrame = async () => {
-      if (!isCapturing || !previewRef.current) return;
+      if (!isCapturing || !phoneRef.current) return;
       if (!isDrawing) {
         isDrawing = true;
+        let tempCanvas: HTMLCanvasElement | null = null;
         try {
-          const tempCanvas = await toCanvas(previewRef.current, {
+          tempCanvas = await toCanvas(phoneRef.current, {
             pixelRatio: 2,
             cacheBust: false,
             skipFonts: false,
@@ -822,14 +835,19 @@ export default function ChatStoryGenerator() {
           ctx.drawImage(tempCanvas, 0, 0, W, H);
         } catch (e) {
           console.warn("Frame drop", e);
+        } finally {
+          if (tempCanvas) {
+            tempCanvas.width = 0;
+            tempCanvas.height = 0;
+          }
+          isDrawing = false;
         }
-        isDrawing = false;
       }
       if (isCapturing) {
-        requestAnimationFrame(() => setTimeout(captureFrame, 50));
+        setTimeout(captureFrame, 66);
       }
     };
-    requestAnimationFrame(captureFrame);
+    setTimeout(captureFrame, 66);
 
     try {
       await playAnimation();
@@ -866,6 +884,7 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
 
       exportProgressRef.current = null;
+      setExportScroll(0);
       setRecording(false);
       setExportProgress(0);
     }
@@ -1508,7 +1527,7 @@ export default function ChatStoryGenerator() {
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
-        <div className="relative" style={{ width: 400, height: 711 }}>
+        <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
           className="aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl bg-black"
@@ -1590,21 +1609,30 @@ export default function ChatStoryGenerator() {
 
           {/* Chat */}
           <div
-            ref={chatScrollRef}
-            className={`flex-1 w-full p-3 overflow-y-auto scroll-smooth ${
-              isWA ? "bg-[#0b141a]" : "bg-black"
-            }`}
-            style={
-              isWA
+            ref={(el) => {
+              chatOuterRef.current = el;
+              chatScrollRef.current = el;
+            }}
+            className="flex-1 w-full overflow-hidden relative"
+            style={{
+              backgroundColor: isWA ? "#0b141a" : "#000000",
+              ...(isWA
                 ? {
-                    scrollbarWidth: "none",
                     backgroundImage:
                       "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
                     backgroundRepeat: "repeat",
                   }
-                : { scrollbarWidth: "none" }
-            }
+                : {}),
+            }}
           >
+            <div
+              ref={chatInnerRef}
+              className="absolute top-0 left-0 w-full flex flex-col justify-end min-h-full pb-6"
+              style={{
+                transform: `translateY(-${exportScroll}px)`,
+                transition: playing || recording ? "transform 0.15s ease-out" : "none",
+              }}
+            >
             <AnimatePresence>
               {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
                 const isLastSent =
@@ -1704,6 +1732,7 @@ export default function ChatStoryGenerator() {
             </AnimatePresence>
           </div>
         </div>
+        </div>
           {recording && (
             <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
               <Loader2 className="h-8 w-8 animate-spin text-white" />
@@ -1716,7 +1745,6 @@ export default function ChatStoryGenerator() {
               />
             </div>
           )}
-          </div>
           </div>
           <Button
             onClick={recordVideo}
@@ -1737,6 +1765,7 @@ export default function ChatStoryGenerator() {
               </>
             )}
           </Button>
+        </div>
         </div>
       </TabsContent>
 
