@@ -727,203 +727,115 @@ export default function ChatStoryGenerator() {
     setRecording(true);
     setExportProgress(0);
 
-    const FPS = 30;
     const SCALE = 2;
     const W = (target.offsetWidth || 400) * SCALE;
     const H = (target.offsetHeight || 711) * SCALE;
-    const delayMs = Number(messageDelay) || 0;
 
-    const offCanvas = document.createElement("canvas");
-    offCanvas.width = W;
-    offCanvas.height = H;
-    const offCtx = offCanvas.getContext("2d")!;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
 
-    type Segment = { png: Uint8Array; durationMs: number };
-    const segments: Segment[] = [];
+    const AC =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
+    const audioCtx = new AC();
+    const audioDest = audioCtx.createMediaStreamDestination();
+    recordingCtxRef.current = { audioCtx, dest: audioDest };
 
-    type AudioSeg = { index: number; startMs: number; blob: Blob };
-    const audioSegments: AudioSeg[] = [];
-    let currentTimeMs = 0;
+    // Detecta o melhor formato suportado pelo browser
+    const FORMATS = [
+      { mime: "video/mp4; codecs=avc1.42E01E,mp4a.40.2", ext: "mp4" },
+      { mime: "video/mp4; codecs=avc1",                  ext: "mp4" },
+      { mime: "video/mp4",                               ext: "mp4" },
+      { mime: "video/webm; codecs=vp9,opus",             ext: "webm" },
+      { mime: "video/webm; codecs=vp8,opus",             ext: "webm" },
+      { mime: "video/webm; codecs=vp8",                  ext: "webm" },
+      { mime: "video/webm",                              ext: "webm" },
+    ];
+    const chosen = FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime));
+    if (!chosen) {
+      alert("Seu navegador não suporta gravação de vídeo. Use o Chrome.");
+      setRecording(false);
+      return;
+    }
 
-    const captureFramePng = async (): Promise<Uint8Array> => {
-      const snap = await toCanvas(target, {
-        pixelRatio: SCALE,
-        cacheBust: false,
-        skipFonts: true,
-        style: { transform: "scale(1)", transformOrigin: "top left" },
-      });
-      offCtx.clearRect(0, 0, W, H);
-      offCtx.drawImage(snap, 0, 0, W, H);
-      return new Promise<Uint8Array>((resolve) => {
-        offCanvas.toBlob(
-          (blob) => blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf))),
-          "image/png"
-        );
-      });
+    const canvasStream = canvas.captureStream(30);
+    const combinedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDest.stream.getAudioTracks(),
+    ]);
+
+    const recorder = new MediaRecorder(combinedStream, {
+      mimeType: chosen.mime,
+      videoBitsPerSecond: 8_000_000,
+      audioBitsPerSecond: 192_000,
+    });
+
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
+    // Solicita chunks frequentes para garantir dados contínuos
+    recorder.start(100);
+
+    // Captura de frames com setInterval — não bloqueia a animação
+    let isCapturing = true;
+    let frameInProgress = false;
+    const frameInterval = setInterval(async () => {
+      if (!isCapturing || !previewRef.current || frameInProgress) return;
+      frameInProgress = true;
+      try {
+        const snap = await toCanvas(previewRef.current, {
+          pixelRatio: SCALE,
+          cacheBust: false,
+          skipFonts: true,
+          style: { transform: "scale(1)", transformOrigin: "top left" },
+        });
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(snap, 0, 0, W, H);
+      } catch { /* frame perdido, sem problema */ }
+      finally { frameInProgress = false; }
+    }, 100); // 10fps de captura — suficiente para chat estático, muito mais leve
+
     try {
-      setExportProgress(2);
+      await playAnimation();
+    } finally {
+      isCapturing = false;
+      clearInterval(frameInterval);
 
-      for (let c = 0; c < chats.length; c++) {
-        const chat = chats[c];
-        setPlayingChatId(chat.id);
-        setActiveChatId(chat.id);
-        const queue: Msg[] = [];
-        setVisibleMessages([]);
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // Aguarda último frame ser desenhado
+      await new Promise<void>((r) => setTimeout(r, 500));
 
-        for (let i = 0; i < chat.messages.length; i++) {
-          const msg = chat.messages[i];
-          queue.push(msg);
-          setVisibleMessages([...queue]);
-          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-          let durationMs = Math.max(300, delayMs);
-
-          if (msg.type === "text" && msg.audioUrl) {
-            const audioDuration = await new Promise<number>((resolve) => {
-              const a = new Audio(msg.audioUrl!);
-              if (a.readyState >= 1) { resolve(a.duration * 1000); }
-              else {
-                a.addEventListener("loadedmetadata", () => resolve(a.duration * 1000), { once: true });
-                a.addEventListener("error", () => resolve(1500), { once: true });
-              }
-            });
-            const mp3Blob = await fetch(msg.audioUrl).then((r) => r.blob());
-            audioSegments.push({ index: audioSegments.length, startMs: currentTimeMs, blob: mp3Blob });
-            durationMs = audioDuration + delayMs;
-          } else if (msg.type === "image") {
-            durationMs = 2000 + delayMs;
-          }
-
-          const png = await captureFramePng();
-          segments.push({ png, durationMs });
-          currentTimeMs += durationMs;
-
-          const totalMsgs = chats.reduce((acc, ch) => acc + ch.messages.length, 0);
-          const doneSoFar = chats.slice(0, c).reduce((acc, ch) => acc + ch.messages.length, 0) + i + 1;
-          setExportProgress(2 + (doneSoFar / totalMsgs) * 40);
-        }
-      }
-
-      setPlayingChatId(null);
-      setVisibleMessages([]);
-      setExportProgress(45);
-
-      const ffmpeg = new FFmpeg();
-      ffmpeg.on("progress", ({ progress }) => {
-        setExportProgress(70 + progress * 28);
+      await new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+        recorder.stop();
       });
 
-      await ffmpeg.load({
-        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
-        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
-      });
+      try { audioCtx.close(); } catch {}
+      recordingCtxRef.current = null;
 
-      setExportProgress(50);
-
-      const concatLines: string[] = [];
-
-      for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
-        const fname = `seg_${i}.png`;
-        await ffmpeg.writeFile(fname, seg.png);
-        const durationSec = (seg.durationMs / 1000).toFixed(4);
-        concatLines.push(`file '${fname}'`);
-        concatLines.push(`duration ${durationSec}`);
-        setExportProgress(50 + (i / segments.length) * 15);
-        await new Promise((r) => setTimeout(r, 0));
+      const blob = new Blob(chunks, { type: chosen.mime });
+      if (blob.size === 0) {
+        alert("O vídeo gerado está vazio. Tente novamente.");
+        setRecording(false);
+        setExportProgress(0);
+        return;
       }
 
-      if (segments.length > 0) {
-        concatLines.push(`file 'seg_${segments.length - 1}.png'`);
-      }
-
-      const concatContent = concatLines.join("\n");
-      const encoder = new TextEncoder();
-      await ffmpeg.writeFile("concat.txt", encoder.encode(concatContent));
-
-      setExportProgress(66);
-
-      for (const seg of audioSegments) {
-        const buf = await seg.blob.arrayBuffer();
-        await ffmpeg.writeFile(`audio_${seg.index}.mp3`, new Uint8Array(buf));
-      }
-
-      setExportProgress(68);
-
-      await ffmpeg.exec([
-        "-f", "concat",
-        "-safe", "0",
-        "-i", "concat.txt",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-preset", "fast",
-        "-crf", "18",
-        "video_silent.mp4",
-      ]);
-
-      setExportProgress(85);
-
-      let finalFile = "video_silent.mp4";
-
-      if (audioSegments.length > 0) {
-        const inputArgs: string[] = ["-i", "video_silent.mp4"];
-        const filterParts: string[] = [];
-        const mixInputs: string[] = [];
-
-        for (let i = 0; i < audioSegments.length; i++) {
-          const seg = audioSegments[i];
-          inputArgs.push("-i", `audio_${seg.index}.mp3`);
-          filterParts.push(`[${i + 1}:a]adelay=${seg.startMs}|${seg.startMs}[a${i}]`);
-          mixInputs.push(`[a${i}]`);
-        }
-
-        const filterComplex =
-          filterParts.join(";") + ";" +
-          mixInputs.join("") +
-          `amix=inputs=${audioSegments.length}:normalize=0[aout]`;
-
-        await ffmpeg.exec([
-          ...inputArgs,
-          "-filter_complex", filterComplex,
-          "-map", "0:v",
-          "-map", "[aout]",
-          "-c:v", "copy",
-          "-c:a", "aac",
-          "-b:a", "192k",
-          "-shortest",
-          "output.mp4",
-        ]);
-
-        finalFile = "output.mp4";
-      }
-
-      const data = await ffmpeg.readFile(finalFile) as Uint8Array;
-      setExportProgress(100);
-
-      const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
-      const blob = new Blob([data as BlobPart], { type: "video/mp4" });
       const url = URL.createObjectURL(blob);
+      const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${safeName}.mp4`;
+      a.download = `${safeName}.${chosen.ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
 
-    } catch (err) {
-      console.error("Erro ao renderizar vídeo:", err);
-      alert(`Erro ao gerar vídeo: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      recordingCtxRef.current = null;
       exportProgressRef.current = null;
       setRecording(false);
       setExportProgress(0);
-      setPlayingChatId(null);
-      setPlaying(false);
     }
   };
 
