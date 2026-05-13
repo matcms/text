@@ -1416,7 +1416,17 @@ export default function ChatStoryGenerator() {
                   {displayChat.contactName}
                 </span>
                 <span className="text-[12px] text-[#8696a0] leading-tight">
-                  {effectiveGroupChat ? "tap here for group info" : "Online"}
+                  {effectiveGroupChat ? (
+                    <input
+                      value={displayChat.groupSubtitle ?? "tap here for group info"}
+                      onChange={(e) =>
+                        updateChatById(displayChat.id, { groupSubtitle: e.target.value })
+                      }
+                      className="bg-transparent border-none outline-none text-[12px] text-[#8696a0] w-full p-0"
+                    />
+                  ) : (
+                    "Online"
+                  )}
                 </span>
               </div>
               <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
