@@ -857,7 +857,7 @@ export default function ChatStoryGenerator() {
       worker.terminate();
       setExportProgress(100);
 
-      const blob = new Blob([mp4], { type: "video/mp4" });
+      const blob = new Blob([mp4 as BlobPart], { type: "video/mp4" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
