@@ -528,6 +528,58 @@ export default function ChatStoryGenerator() {
     return URL.createObjectURL(blob);
   };
 
+  // Reusable single-message audio generator (resolves voice from chat voiceMap, savedVoices, or raw id)
+  const generateSingleAudio = async (
+    text: string,
+    voiceIdentifier: string,
+    chatId: string
+  ): Promise<string> => {
+    if (!elevenKey) throw new Error("API key do ElevenLabs ausente.");
+    const chat = chats.find((c) => c.id === chatId);
+    let voiceId = (chat?.voiceMap[voiceIdentifier] || "").trim();
+    if (!voiceId) {
+      const sv = savedVoices.find(
+        (v) => v.name.toLowerCase() === voiceIdentifier.toLowerCase()
+      );
+      if (sv) voiceId = sv.voiceId;
+    }
+    if (!voiceId) voiceId = voiceIdentifier.trim();
+    if (!voiceId) throw new Error(`Voice ID não encontrado para "${voiceIdentifier}".`);
+    return ttsElevenLabs(stripCensors(text), voiceId);
+  };
+
+  const [regeneratingMsgId, setRegeneratingMsgId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const updateTextMessage = (msgId: number, patch: Partial<TextMsg>) => {
+    updateActiveChat({
+      messages: activeChat.messages.map((m) =>
+        m.id === msgId && m.type === "text" ? { ...m, ...patch } : m
+      ),
+    });
+  };
+
+  const regenerateOneAudio = async (msgId: number) => {
+    const msg = activeChat.messages.find((m) => m.id === msgId && m.type === "text") as
+      | TextMsg
+      | undefined;
+    if (!msg) return;
+    setRegeneratingMsgId(msgId);
+    try {
+      const url = await generateSingleAudio(
+        msg.spokenText ?? msg.text,
+        msg.voiceName,
+        activeChat.id
+      );
+      updateTextMessage(msgId, { audioUrl: url });
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao regenerar áudio: ${(e as Error).message}`);
+    } finally {
+      setRegeneratingMsgId(null);
+    }
+  };
+
   const generateAudios = async () => {
     if (!elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
