@@ -1511,8 +1511,7 @@ export default function ChatStoryGenerator() {
         <div className="relative" style={{ width: 400, height: 711 }}>
         <div
           ref={previewRef}
-          className="rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
-          style={{ width: 400, height: 711 }}
+          className="aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl bg-black"
         >
           {/* Header */}
           {isWA ? (
