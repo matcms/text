@@ -440,6 +440,7 @@ export default function ChatStoryGenerator() {
 
     setChats(newChats);
     setActiveChatId(newChats[0].id);
+    if (newChats[0].isGroupChat !== undefined) setIsGroupChat(!!newChats[0].isGroupChat);
     setVisibleMessages([]);
   };
 
