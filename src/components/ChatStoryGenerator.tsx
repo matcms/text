@@ -1591,7 +1591,7 @@ export default function ChatStoryGenerator() {
           {/* Chat */}
           <div
             ref={chatScrollRef}
-            className={`flex-1 p-3 overflow-y-auto scroll-smooth ${
+            className={`flex-1 w-full p-3 overflow-y-auto scroll-smooth ${
               isWA ? "bg-[#0b141a]" : "bg-black"
             }`}
             style={
