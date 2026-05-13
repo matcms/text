@@ -652,8 +652,9 @@ export default function ChatStoryGenerator() {
     const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
     exportProgressRef.current = { done: 0, total: totalMessages };
 
-    const W = target.offsetWidth || 400;
-    const H = target.offsetHeight || 711;
+    const SCALE = 2;
+    const W = (target.offsetWidth || 400) * SCALE;
+    const H = (target.offsetHeight || 711) * SCALE;
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
@@ -671,7 +672,10 @@ export default function ChatStoryGenerator() {
       ...canvasStream.getVideoTracks(),
       ...audioDest.stream.getAudioTracks(),
     ]);
-    const recorder = new MediaRecorder(combinedStream, { mimeType: "video/webm" });
+    const recorder = new MediaRecorder(combinedStream, {
+      mimeType: "video/webm; codecs=vp8",
+      videoBitsPerSecond: 8_000_000,
+    });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -679,22 +683,24 @@ export default function ChatStoryGenerator() {
     recorder.start();
 
     let isCapturing = true;
+    let rafId: number | null = null;
     const captureFrame = async () => {
       if (!isCapturing || !previewRef.current) return;
       try {
         const tempCanvas = await toCanvas(previewRef.current, {
-          pixelRatio: 1,
-          skipFonts: false,
+          pixelRatio: SCALE,
           cacheBust: true,
+          skipFonts: false,
+          style: { transform: "scale(1)", transformOrigin: "top left" },
         });
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
       } catch (e) {
         console.warn("Frame drop", e);
       }
-      if (isCapturing) setTimeout(captureFrame, 66);
+      if (isCapturing) rafId = requestAnimationFrame(captureFrame);
     };
-    captureFrame();
+    rafId = requestAnimationFrame(captureFrame);
 
     try {
       await playAnimation();
