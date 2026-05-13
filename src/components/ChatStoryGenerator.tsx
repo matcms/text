@@ -225,8 +225,7 @@ export default function ChatStoryGenerator() {
     return map;
   };
 
-  const ttsElevenLabs = async (text: string, voiceName: string): Promise<string> => {
-    const voiceId = voiceName.trim();
+  const ttsElevenLabs = async (text: string, voiceId: string): Promise<string> => {
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {
