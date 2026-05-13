@@ -1193,6 +1193,81 @@ export default function ChatStoryGenerator() {
           )}
         </Button>
 
+        {/* Post-Generation Editor */}
+        {(() => {
+          const textMsgs = activeChat.messages.filter(
+            (m): m is TextMsg => m.type === "text"
+          );
+          const hasAnyAudio = textMsgs.some((m) => !!m.audioUrl);
+          if (textMsgs.length === 0 || !hasAnyAudio) return null;
+          return (
+            <Collapsible
+              open={editorOpen}
+              onOpenChange={setEditorOpen}
+              className="rounded-lg border"
+            >
+              <CollapsibleTrigger className="flex w-full items-center justify-between p-4 text-left">
+                <div>
+                  <h2 className="font-semibold text-sm">Post-Generation Editor</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Corrija typos ou troque a voz de mensagens individuais sem regerar tudo.
+                  </p>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${editorOpen ? "rotate-180" : ""}`}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="px-4 pb-4 space-y-3">
+                {textMsgs.map((msg) => {
+                  const isLoading = regeneratingMsgId === msg.id;
+                  return (
+                    <div key={msg.id} className="rounded-md border p-3 space-y-2">
+                      <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+                        <div className="space-y-2">
+                          <Input
+                            className="h-8 text-xs"
+                            placeholder="Voz (ex: Adam)"
+                            value={msg.voiceName}
+                            onChange={(e) =>
+                              updateTextMessage(msg.id, { voiceName: e.target.value })
+                            }
+                          />
+                          <Textarea
+                            className="text-xs min-h-[60px]"
+                            value={msg.text}
+                            onChange={(e) =>
+                              updateTextMessage(msg.id, {
+                                text: e.target.value,
+                                spokenText: undefined,
+                              })
+                            }
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isLoading || !msg.voiceName.trim() || !msg.text.trim()}
+                          onClick={() => regenerateOneAudio(msg.id)}
+                          title="Regenerar este áudio"
+                        >
+                          {isLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      {msg.audioUrl && (
+                        <audio controls src={msg.audioUrl} className="h-8 w-full mt-2" />
+                      )}
+                    </div>
+                  );
+                })}
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })()}
+
         {imageMessages.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
             <h2 className="font-semibold flex items-center gap-2">
