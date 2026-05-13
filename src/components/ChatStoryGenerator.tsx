@@ -1517,7 +1517,10 @@ export default function ChatStoryGenerator() {
                   }`}
                 >
                   {!isWA && showName && (
-                    <span className="text-[11px] text-[#8e8e93] mb-0.5 ml-3 capitalize block">
+                    <span
+                      className="text-[11px] mb-0.5 ml-3 capitalize block"
+                      style={{ color: nameColor || "#8e8e93" }}
+                    >
                       {senderName}
                     </span>
                   )}
