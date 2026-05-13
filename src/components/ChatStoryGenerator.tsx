@@ -44,6 +44,7 @@ type Chat = {
   headerTime: string;
   script: string;
   messages: Msg[];
+  voiceMap: Record<string, string>;
 };
 
 type ChatTheme = "imessage" | "whatsapp";
@@ -62,6 +63,7 @@ const newChat = (i: number): Chat => ({
   headerTime: "23",
   script: DEFAULT_SCRIPT,
   messages: [],
+  voiceMap: {},
 });
 
 // Convert base64 (mp3) to blob URL
@@ -160,7 +162,12 @@ export default function ChatStoryGenerator() {
         });
       }
     }
-    updateActiveChat({ contactName: header, messages: parsed });
+    const uniqueNames = Array.from(
+      new Set(parsed.filter((m): m is TextMsg => m.type === "text").map((m) => m.voiceName))
+    );
+    const newMap: Record<string, string> = {};
+    for (const n of uniqueNames) newMap[n] = activeChat.voiceMap[n] || "";
+    updateActiveChat({ contactName: header, messages: parsed, voiceMap: newMap });
     setVisibleMessages([]);
   };
 
@@ -218,8 +225,7 @@ export default function ChatStoryGenerator() {
     return map;
   };
 
-  const ttsElevenLabs = async (text: string, voiceName: string): Promise<string> => {
-    const voiceId = voiceName.trim();
+  const ttsElevenLabs = async (text: string, voiceId: string): Promise<string> => {
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {
@@ -267,8 +273,15 @@ export default function ChatStoryGenerator() {
     chats.forEach((c) => (chatMessagesMap[c.id] = [...c.messages]));
 
     for (const { chatId, msg } of allTexts) {
+      const chat = chats.find((c) => c.id === chatId)!;
+      const voiceId = (chat.voiceMap[msg.voiceName] || "").trim();
+      if (!voiceId) {
+        alert(`Defina o Voice ID para "${msg.voiceName}" no chat "${chat.name}".`);
+        setGenerating(false);
+        return;
+      }
       try {
-        const audioUrl = await ttsElevenLabs(msg.text, msg.voiceName);
+        const audioUrl = await ttsElevenLabs(msg.text, voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
@@ -544,6 +557,30 @@ export default function ChatStoryGenerator() {
         <Button onClick={parseScript} className="w-full">
           Parse Script
         </Button>
+
+        {Object.keys(activeChat.voiceMap).length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold text-sm">Voice IDs por personagem</h2>
+            <p className="text-xs text-muted-foreground">
+              Cole o <code>voice_id</code> do ElevenLabs para cada personagem detectado no script.
+            </p>
+            {Object.keys(activeChat.voiceMap).map((name) => (
+              <div key={name} className="grid grid-cols-3 gap-2 items-center">
+                <Label className="col-span-1 truncate">{name}</Label>
+                <Input
+                  className="col-span-2 font-mono text-xs"
+                  placeholder="voice_id (ex: 21m00Tcm4TlvDq8ikWAM)"
+                  value={activeChat.voiceMap[name]}
+                  onChange={(e) =>
+                    updateActiveChat({
+                      voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Pause control */}
         <div className="space-y-2 rounded-lg border p-4">
