@@ -1192,29 +1192,10 @@ export default function ChatStoryGenerator() {
           Play vídeo (todos os chats)
         </Button>
 
-        <Button
-          onClick={recordVideo}
-          disabled={!allAudiosReady || playing || recording}
-          className="w-full"
-          size="lg"
-          variant="secondary"
-        >
-          {recording ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Gravando vídeo...
-            </>
-          ) : (
-            <>
-              <Upload className="mr-2 h-4 w-4 rotate-180" />
-              Baixar vídeo (.mp4)
-            </>
-          )}
-        </Button>
       </div>
 
       {/* RIGHT */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen bg-background">
+      <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
         <div
           ref={previewRef}
           className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
