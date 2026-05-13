@@ -1535,8 +1535,6 @@ export default function ChatStoryGenerator() {
           )}
         </div>
 
-      </div>
-
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
