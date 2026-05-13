@@ -769,30 +769,6 @@ export default function ChatStoryGenerator() {
           </div>
         )}
 
-        {/* Pause control */}
-        <div className="space-y-2 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <Label>Pausa entre mensagens (segundos)</Label>
-            <span className="text-xs text-muted-foreground">{messagePauseSec.toFixed(2)}s</span>
-          </div>
-          <Input
-            type="number"
-            step={0.05}
-            min={0}
-            value={messagePauseSec}
-            onChange={(e) => setMessagePauseSec(Math.max(0, Number(e.target.value) || 0))}
-            placeholder="0.3"
-          />
-          <div className="flex gap-2 pt-1 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0)}>0s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.1)}>0.1s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.3)}>0.3s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(0.6)}>0.6s</Button>
-            <Button size="sm" variant="outline" onClick={() => setMessagePauseSec(1)}>1s</Button>
-          </div>
-        </div>
-
-
         <Button
           onClick={generateAudios}
           disabled={generating}
