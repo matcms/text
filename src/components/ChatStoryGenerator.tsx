@@ -1639,10 +1639,9 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className="absolute top-0 left-0 w-full flex flex-col justify-end pb-6 min-h-full"
+              className="absolute top-0 left-0 w-full flex flex-col justify-start pb-24 min-h-full"
               style={{
                 transform: `translateY(-${exportScroll}px)`,
-                transition: playing || recording ? "transform 0.15s ease-out" : "none",
               }}
             >
             <AnimatePresence>
