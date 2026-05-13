@@ -127,6 +127,8 @@ const newChat = (i: number): Chat => ({
   messages: [],
   voiceMap: {},
   isGroupChat: false,
+  groupSubtitle: "tap here for group info",
+  nameColors: {},
 });
 
 // Convert base64 (mp3) to blob URL
