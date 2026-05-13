@@ -210,94 +210,6 @@ export default function ChatStoryGenerator() {
   const [exportScroll, setExportScroll] = useState(0);
   const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
 
-  // Compact mode + Background library
-  type Background = { id: string; name: string; kind: "color" | "image"; value: string };
-  const DEFAULT_BACKGROUNDS: Background[] = [
-    { id: "bg-purple", name: "Roxo", kind: "color", value: "#7c3aed" },
-    { id: "bg-pink", name: "Rosa", kind: "color", value: "#ec4899" },
-    { id: "bg-blue", name: "Azul", kind: "color", value: "#2563eb" },
-    { id: "bg-green", name: "Verde", kind: "color", value: "#16a34a" },
-    { id: "bg-black", name: "Preto", kind: "color", value: "#000000" },
-    { id: "bg-grad-sunset", name: "Sunset", kind: "color", value: "linear-gradient(135deg,#ff6b6b,#feca57)" },
-    { id: "bg-grad-ocean", name: "Ocean", kind: "color", value: "linear-gradient(135deg,#2193b0,#6dd5ed)" },
-    { id: "bg-grad-purple", name: "Purple Haze", kind: "color", value: "linear-gradient(135deg,#8e2de2,#4a00e0)" },
-  ];
-  const [compactMode, setCompactMode] = useState(false);
-  const [bgLibrary, setBgLibrary] = useState<Background[]>(DEFAULT_BACKGROUNDS);
-  const [activeBgId, setActiveBgId] = useState<string>("bg-purple");
-  const bgUploadRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("bg_library_v1");
-      if (raw) {
-        const saved = JSON.parse(raw) as Background[];
-        // merge defaults + saved customs (avoid duplicates by id)
-        const ids = new Set(DEFAULT_BACKGROUNDS.map((b) => b.id));
-        const customs = saved.filter((b) => !ids.has(b.id));
-        setBgLibrary([...DEFAULT_BACKGROUNDS, ...customs]);
-      }
-      const ab = localStorage.getItem("bg_active_v1");
-      if (ab) setActiveBgId(ab);
-      const cm = localStorage.getItem("compact_mode_v1");
-      if (cm) setCompactMode(cm === "1");
-    } catch { /* noop */ }
-  }, []);
-  useEffect(() => {
-    try {
-      const customs = bgLibrary.filter((b) => !DEFAULT_BACKGROUNDS.some((d) => d.id === b.id));
-      localStorage.setItem("bg_library_v1", JSON.stringify(customs));
-    } catch { /* noop */ }
-  }, [bgLibrary]);
-  useEffect(() => {
-    localStorage.setItem("bg_active_v1", activeBgId);
-  }, [activeBgId]);
-  useEffect(() => {
-    localStorage.setItem("compact_mode_v1", compactMode ? "1" : "0");
-  }, [compactMode]);
-
-  const activeBg = bgLibrary.find((b) => b.id === activeBgId) || bgLibrary[0];
-  const bgStyle: React.CSSProperties = activeBg
-    ? activeBg.kind === "image"
-      ? { backgroundImage: `url(${activeBg.value})`, backgroundSize: "cover", backgroundPosition: "center" }
-      : activeBg.value.startsWith("linear-gradient") || activeBg.value.startsWith("radial-gradient")
-        ? { backgroundImage: activeBg.value }
-        : { backgroundColor: activeBg.value }
-    : { backgroundColor: "#000" };
-
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      alert("Imagem muito grande (máx 5MB).");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      const id = `bg_${Date.now()}`;
-      const name = file.name.replace(/\.[^.]+$/, "").slice(0, 24) || "Fundo";
-      const next: Background = { id, name, kind: "image", value: dataUrl };
-      setBgLibrary((p) => [...p, next]);
-      setActiveBgId(id);
-    };
-    reader.readAsDataURL(file);
-  };
-  const removeBg = (id: string) => {
-    if (DEFAULT_BACKGROUNDS.some((d) => d.id === id)) return;
-    setBgLibrary((p) => p.filter((b) => b.id !== id));
-    if (activeBgId === id) setActiveBgId("bg-purple");
-  };
-  const addColorToLibrary = (hex: string) => {
-    const v = hex.trim();
-    if (!/^#[0-9a-f]{6}$/i.test(v)) return;
-    const id = `bg_${Date.now()}`;
-    const next: Background = { id, name: v.toUpperCase(), kind: "color", value: v };
-    setBgLibrary((p) => [...p, next]);
-    setActiveBgId(id);
-  };
-
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
@@ -1135,88 +1047,6 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
-        {/* Background & Compact mode */}
-        <div className="space-y-4 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <Label>Modo Compacto (chat flutuante)</Label>
-            <button
-              type="button"
-              onClick={() => setCompactMode((v) => !v)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${compactMode ? "bg-primary" : "bg-muted"}`}
-            >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${compactMode ? "translate-x-5" : "translate-x-1"}`}
-              />
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Quando ativo, o chat aparece como um cartão menor sobre um fundo (estilo TikTok/Reels).
-          </p>
-
-          <div className="space-y-2">
-            <Label>Biblioteca de fundos</Label>
-            <div className="grid grid-cols-5 gap-2">
-              {bgLibrary.map((b) => {
-                const isActive = b.id === activeBgId;
-                const isCustom = !DEFAULT_BACKGROUNDS.some((d) => d.id === b.id);
-                const preview: React.CSSProperties =
-                  b.kind === "image"
-                    ? { backgroundImage: `url(${b.value})`, backgroundSize: "cover", backgroundPosition: "center" }
-                    : b.value.startsWith("linear-gradient") || b.value.startsWith("radial-gradient")
-                      ? { backgroundImage: b.value }
-                      : { backgroundColor: b.value };
-                return (
-                  <div key={b.id} className="relative group">
-                    <button
-                      type="button"
-                      title={b.name}
-                      onClick={() => setActiveBgId(b.id)}
-                      style={preview}
-                      className={`w-full aspect-square rounded-md border-2 transition-all ${isActive ? "border-primary ring-2 ring-primary/40" : "border-transparent hover:border-muted-foreground/40"}`}
-                    />
-                    {isCustom && (
-                      <button
-                        type="button"
-                        onClick={() => removeBg(b.id)}
-                        className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-                        aria-label={`Remover ${b.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <input
-              ref={bgUploadRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleBgUpload}
-            />
-            <Button size="sm" variant="outline" onClick={() => bgUploadRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" /> Upload imagem
-            </Button>
-            <div className="flex items-center gap-1">
-              <input
-                type="color"
-                defaultValue="#7c3aed"
-                onChange={(e) => addColorToLibrary(e.target.value)}
-                className="h-8 w-10 rounded border cursor-pointer bg-transparent"
-                title="Adicionar cor à biblioteca"
-              />
-              <span className="text-xs text-muted-foreground">+ cor</span>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Fundos personalizados ficam salvos no navegador. Imagens até 5MB.
-          </p>
-        </div>
-
         {/* Chat tabs */}
         <div className="flex flex-wrap gap-2 items-center">
           {chats.map((c) => (
@@ -1704,26 +1534,17 @@ export default function ChatStoryGenerator() {
             </Button>
           )}
         </div>
-
-      </div>
+        </div>
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className={`aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl ${compactMode ? "" : "bg-black"}`}
-          style={compactMode ? bgStyle : undefined}
+          className="aspect-[9/16] w-full max-w-[400px] h-full bg-black overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl"
         >
-          <div
-            className={
-              compactMode
-                ? "absolute left-[5%] right-[5%] top-[8%] h-[46%] flex flex-col rounded-2xl overflow-hidden shadow-xl bg-black"
-                : "flex flex-col flex-1 w-full h-full"
-            }
-          >
           {/* Header */}
-          {!compactMode && (isWA ? (
+          {isWA ? (
             <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
               <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
               {displayChat.contactPhoto ? (
@@ -1795,7 +1616,7 @@ export default function ChatStoryGenerator() {
                 <Video className="h-5 w-5 text-white" />
               </div>
             </div>
-          ))}
+          )}
 
           {/* Chat */}
           <div
@@ -1817,7 +1638,7 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className={`absolute top-0 left-0 w-full flex flex-col ${compactMode ? "justify-start pt-3 px-2" : "justify-end pb-6"} min-h-full`}
+              className="absolute top-0 left-0 w-full flex flex-col justify-end pb-6 min-h-full"
               style={{
                 transform: `translateY(-${exportScroll}px)`,
                 transition: playing || recording ? "transform 0.15s ease-out" : "none",
@@ -1921,7 +1742,6 @@ export default function ChatStoryGenerator() {
               );})}
             </AnimatePresence>
           </div>
-        </div>
         </div>
         </div>
           {recording && (
