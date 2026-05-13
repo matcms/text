@@ -749,9 +749,8 @@ export default function ChatStoryGenerator() {
     setRecording(true);
     setExportProgress(0);
 
-    const SCALE = 2;
-    const W = (target.offsetWidth || 400) * SCALE;
-    const H = (target.offsetHeight || 711) * SCALE;
+    const W = 1080;
+    const H = 1920;
 
     const canvas = document.createElement("canvas");
     canvas.width = W;
@@ -798,33 +797,44 @@ export default function ChatStoryGenerator() {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
-    // Solicita chunks frequentes para garantir dados contínuos
     recorder.start(100);
 
-    // Captura de frames com setInterval — não bloqueia a animação
+    // Throttled capture loop (~20fps) with lock so React keeps CPU to scroll
     let isCapturing = true;
-    let frameInProgress = false;
-    const frameInterval = setInterval(async () => {
-      if (!isCapturing || !previewRef.current || frameInProgress) return;
-      frameInProgress = true;
-      try {
-        const snap = await toCanvas(previewRef.current, {
-          pixelRatio: SCALE,
-          cacheBust: false,
-          skipFonts: true,
-          style: { transform: "scale(1)", transformOrigin: "top left" },
-        });
-        ctx.clearRect(0, 0, W, H);
-        ctx.drawImage(snap, 0, 0, W, H);
-      } catch { /* frame perdido, sem problema */ }
-      finally { frameInProgress = false; }
-    }, 100); // 10fps de captura — suficiente para chat estático, muito mais leve
+    let isDrawing = false;
+    const captureFrame = async () => {
+      if (!isCapturing || !previewRef.current) return;
+      if (!isDrawing) {
+        isDrawing = true;
+        try {
+          const tempCanvas = await toCanvas(previewRef.current, {
+            pixelRatio: 2,
+            cacheBust: false,
+            skipFonts: false,
+            style: {
+              transform: "scale(1)",
+              transformOrigin: "top left",
+              margin: "0",
+              borderRadius: "0",
+            },
+          });
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(tempCanvas, 0, 0, W, H);
+        } catch (e) {
+          console.warn("Frame drop", e);
+        }
+        isDrawing = false;
+      }
+      if (isCapturing) {
+        requestAnimationFrame(() => setTimeout(captureFrame, 50));
+      }
+    };
+    requestAnimationFrame(captureFrame);
 
     try {
       await playAnimation();
     } finally {
       isCapturing = false;
-      clearInterval(frameInterval);
 
       // Aguarda último frame ser desenhado
       await new Promise<void>((r) => setTimeout(r, 500));
