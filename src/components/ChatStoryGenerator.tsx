@@ -87,6 +87,7 @@ type Chat = {
   script: string;
   messages: Msg[];
   voiceMap: Record<string, string>;
+  isGroupChat?: boolean;
 };
 
 type ChatTheme = "imessage" | "whatsapp";
@@ -106,6 +107,7 @@ const newChat = (i: number): Chat => ({
   script: DEFAULT_SCRIPT,
   messages: [],
   voiceMap: {},
+  isGroupChat: false,
 });
 
 // Convert base64 (mp3) to blob URL
@@ -333,23 +335,33 @@ export default function ChatStoryGenerator() {
   const parseScript = () => {
     const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
 
-    type Seg = { theme: ChatTheme; contactName: string; lines: string[] };
+    type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null };
     const segs: Seg[] = [];
     let cur: Seg | null = null;
 
     for (const line of lines) {
-      const headerMatch = line.match(/^-\s*(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i);
+      const headerMatch = line.match(
+        /^-\s*(?:(Direct|Group)\s+)?(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i,
+      );
       if (headerMatch) {
-        const kind = headerMatch[1].toLowerCase();
-        const name = headerMatch[2].trim();
+        const modeKw = headerMatch[1]?.toLowerCase();
+        const kind = headerMatch[2].toLowerCase();
+        const name = headerMatch[3].trim();
         const theme: ChatTheme =
           kind === "whatsapp" ? "whatsapp" : kind === "imessage" ? "imessage" : chatTheme;
-        cur = { theme, contactName: name, lines: [] };
+        const groupMode: boolean | null =
+          modeKw === "group" ? true : modeKw === "direct" ? false : null;
+        cur = { theme, contactName: name, lines: [], groupMode };
         segs.push(cur);
         continue;
       }
       if (!cur) {
-        cur = { theme: chatTheme, contactName: activeChat.contactName, lines: [] };
+        cur = {
+          theme: chatTheme,
+          contactName: activeChat.contactName,
+          lines: [],
+          groupMode: null,
+        };
         segs.push(cur);
       }
       cur.lines.push(line);
@@ -402,8 +414,16 @@ export default function ChatStoryGenerator() {
       const voiceMap: Record<string, string> = {};
       for (const n of uniqueNames) voiceMap[n] = baseMap[n] || "";
 
+      const resolvedGroup = s.groupMode ?? (i === 0 ? activeChat.isGroupChat ?? isGroupChat : false);
+
       if (i === 0) {
-        return { ...activeChat, contactName: s.contactName, messages, voiceMap };
+        return {
+          ...activeChat,
+          contactName: s.contactName,
+          messages,
+          voiceMap,
+          isGroupChat: resolvedGroup,
+        };
       }
       return {
         id: `chat_${Date.now()}_${i}`,
@@ -414,11 +434,13 @@ export default function ChatStoryGenerator() {
         script: "",
         messages,
         voiceMap,
+        isGroupChat: resolvedGroup,
       };
     });
 
     setChats(newChats);
     setActiveChatId(newChats[0].id);
+    if (newChats[0].isGroupChat !== undefined) setIsGroupChat(!!newChats[0].isGroupChat);
     setVisibleMessages([]);
   };
 
@@ -714,6 +736,7 @@ export default function ChatStoryGenerator() {
     : activeChat;
 
   const isWA = chatTheme === "whatsapp";
+  const effectiveGroupChat = displayChat.isGroupChat ?? isGroupChat;
 
   return (
     <Tabs
@@ -795,15 +818,21 @@ export default function ChatStoryGenerator() {
             <div className="flex gap-2 flex-wrap">
               <Button
                 size="sm"
-                variant={!isGroupChat ? "default" : "outline"}
-                onClick={() => setIsGroupChat(false)}
+                variant={!effectiveGroupChat ? "default" : "outline"}
+                onClick={() => {
+                  setIsGroupChat(false);
+                  updateActiveChat({ isGroupChat: false });
+                }}
               >
                 Direct Message
               </Button>
               <Button
                 size="sm"
-                variant={isGroupChat ? "default" : "outline"}
-                onClick={() => setIsGroupChat(true)}
+                variant={effectiveGroupChat ? "default" : "outline"}
+                onClick={() => {
+                  setIsGroupChat(true);
+                  updateActiveChat({ isGroupChat: true });
+                }}
               >
                 Group Chat
               </Button>
@@ -983,7 +1012,7 @@ export default function ChatStoryGenerator() {
             onChange={(e) => updateActiveChat({ script: e.target.value })}
           />
           <p className="text-xs text-muted-foreground">
-            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template automaticamente) e linhas <code>1: NomeDaVoz&gt; texto</code>.
+            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template). Use <code>- Direct iMessage: nome</code> ou <code>- Group Whatsapp: nome</code> para definir o modo. Linhas: <code>1: NomeDaVoz&gt; texto</code>.
           </p>
         </div>
 
@@ -1221,7 +1250,7 @@ export default function ChatStoryGenerator() {
                   {displayChat.contactName}
                 </span>
                 <span className="text-[12px] text-[#8696a0] leading-tight">
-                  {isGroupChat ? "tap here for group info" : "Online"}
+                  {effectiveGroupChat ? "tap here for group info" : "Online"}
                 </span>
               </div>
               <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
@@ -1240,7 +1269,7 @@ export default function ChatStoryGenerator() {
                 />
               </div>
               <div className="flex flex-col items-center mx-auto w-fit">
-                {isGroupChat ? (
+                {effectiveGroupChat ? (
                   <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center">
                     <Users className="h-7 w-7 text-white" />
                   </div>
@@ -1291,7 +1320,7 @@ export default function ChatStoryGenerator() {
                 const prev = arr[idx - 1];
                 const senderName = m.type === "text" ? m.voiceName : "";
                 const showName =
-                  isGroupChat &&
+                  effectiveGroupChat &&
                   m.side === "1" &&
                   m.type === "text" &&
                   (idx === 0 ||
