@@ -619,79 +619,79 @@ export default function ChatStoryGenerator() {
       return;
     }
     setRecording(true);
-    const W = target.offsetWidth;
-    const H = target.offsetHeight;
+    setExportProgress(0);
+
+    const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
+    exportProgressRef.current = { done: 0, total: totalMessages };
+
+    const W = target.offsetWidth || 400;
+    const H = target.offsetHeight || 711;
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext("2d")!;
 
-    const audioCtx = new AudioContext();
-    const dest = audioCtx.createMediaStreamDestination();
-    recordingCtxRef.current = { audioCtx, dest };
+    const AC: typeof AudioContext =
+      (window as unknown as { AudioContext: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const audioCtx = new AC();
+    const audioDest = audioCtx.createMediaStreamDestination();
+    recordingCtxRef.current = { audioCtx, dest: audioDest };
 
-    const videoStream = canvas.captureStream(30);
-    const combined = new MediaStream([
-      ...videoStream.getVideoTracks(),
-      ...dest.stream.getAudioTracks(),
+    const canvasStream = canvas.captureStream(30);
+    const combinedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDest.stream.getAudioTracks(),
     ]);
-    const mimeCandidates = [
-      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-      "video/mp4;codecs=avc1,mp4a",
-      "video/mp4",
-      "video/webm;codecs=vp9,opus",
-      "video/webm;codecs=vp8,opus",
-      "video/webm",
-    ];
-    const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
-    const isMp4 = mime.startsWith("video/mp4");
-    const recorder = new MediaRecorder(combined, { mimeType: mime });
+    const recorder = new MediaRecorder(combinedStream, { mimeType: "video/webm" });
     const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    recorder.start(100);
-
-    let drawing = true;
-    const drawLoop = async () => {
-      while (drawing) {
-        try {
-          const snap = await html2canvas(target, {
-            backgroundColor: null,
-            scale: 1,
-            logging: false,
-            useCORS: true,
-          });
-          ctx.drawImage(snap, 0, 0, W, H);
-        } catch (err) {
-          console.error(err);
-        }
-        await new Promise((r) => setTimeout(r, 150));
-      }
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
     };
-    drawLoop();
+    recorder.start();
+
+    let isCapturing = true;
+    const captureFrame = async () => {
+      if (!isCapturing || !previewRef.current) return;
+      try {
+        const tempCanvas = await toCanvas(previewRef.current, {
+          pixelRatio: 1,
+          skipFonts: false,
+          cacheBust: true,
+        });
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        console.warn("Frame drop", e);
+      }
+      if (isCapturing) setTimeout(captureFrame, 66);
+    };
+    captureFrame();
 
     try {
       await playAnimation();
     } finally {
-      drawing = false;
-      await new Promise((r) => setTimeout(r, 400));
-      recorder.stop();
-      await new Promise((r) => (recorder.onstop = () => r(null)));
-      try { audioCtx.close(); } catch {}
-      recordingCtxRef.current = null;
-
-      const outType = isMp4 ? "video/mp4" : "video/webm";
-      const ext = isMp4 ? "mp4" : "webm";
-      const blob = new Blob(chunks, { type: outType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const safeName = (projectName.trim() || "video").replace(/[^a-z0-9-_]+/gi, "_");
-      a.download = `${safeName}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setRecording(false);
+      isCapturing = false;
+      setTimeout(() => {
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: "video/webm" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
+          a.download = `${safeName}.webm`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          try { audioCtx.close(); } catch {}
+          recordingCtxRef.current = null;
+          exportProgressRef.current = null;
+          setRecording(false);
+          setExportProgress(0);
+        };
+        recorder.stop();
+      }, 500);
     }
   };
 
