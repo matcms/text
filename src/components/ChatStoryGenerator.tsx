@@ -1202,9 +1202,6 @@ export default function ChatStoryGenerator() {
                       <span className="text-center">{m.text}</span>
                     </div>
                   )}
-                  {!isWA && isLastSent && (
-                    <span className="text-[#8e8e93] text-[11px] mt-0.5 mr-1">Entregue</span>
-                  )}
                 </motion.div>
               );})}
             </AnimatePresence>
