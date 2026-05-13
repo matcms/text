@@ -548,6 +548,7 @@ export default function ChatStoryGenerator() {
     }
   };
 
+  const addChat = () => {
     const next = newChat(chats.length + 1);
     setChats((p) => [...p, next]);
     setActiveChatId(next.id);
