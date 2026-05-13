@@ -496,11 +496,15 @@ export default function ChatStoryGenerator() {
       ...dest.stream.getAudioTracks(),
     ]);
     const mimeCandidates = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1,mp4a",
+      "video/mp4",
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
       "video/webm",
     ];
     const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const isMp4 = mime.startsWith("video/mp4");
     const recorder = new MediaRecorder(combined, { mimeType: mime });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
@@ -535,11 +539,13 @@ export default function ChatStoryGenerator() {
       try { audioCtx.close(); } catch {}
       recordingCtxRef.current = null;
 
-      const blob = new Blob(chunks, { type: "video/webm" });
+      const outType = isMp4 ? "video/mp4" : "video/webm";
+      const ext = isMp4 ? "mp4" : "webm";
+      const blob = new Blob(chunks, { type: outType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `chat-story-${Date.now()}.webm`;
+      a.download = `chat-story-${Date.now()}.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1018,7 +1024,7 @@ export default function ChatStoryGenerator() {
           ) : (
             <>
               <Upload className="mr-2 h-4 w-4 rotate-180" />
-              Baixar vídeo (.webm)
+              Baixar vídeo (.mp4)
             </>
           )}
         </Button>
