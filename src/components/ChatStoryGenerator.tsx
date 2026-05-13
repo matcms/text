@@ -652,8 +652,9 @@ export default function ChatStoryGenerator() {
     const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
     exportProgressRef.current = { done: 0, total: totalMessages };
 
-    const W = target.offsetWidth || 400;
-    const H = target.offsetHeight || 711;
+    const SCALE = 2;
+    const W = (target.offsetWidth || 400) * SCALE;
+    const H = (target.offsetHeight || 711) * SCALE;
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
@@ -671,7 +672,10 @@ export default function ChatStoryGenerator() {
       ...canvasStream.getVideoTracks(),
       ...audioDest.stream.getAudioTracks(),
     ]);
-    const recorder = new MediaRecorder(combinedStream, { mimeType: "video/webm" });
+    const recorder = new MediaRecorder(combinedStream, {
+      mimeType: "video/webm; codecs=vp8",
+      videoBitsPerSecond: 8_000_000,
+    });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -679,27 +683,30 @@ export default function ChatStoryGenerator() {
     recorder.start();
 
     let isCapturing = true;
+    let rafId: number | null = null;
     const captureFrame = async () => {
       if (!isCapturing || !previewRef.current) return;
       try {
         const tempCanvas = await toCanvas(previewRef.current, {
-          pixelRatio: 1,
-          skipFonts: false,
+          pixelRatio: SCALE,
           cacheBust: true,
+          skipFonts: false,
+          style: { transform: "scale(1)", transformOrigin: "top left" },
         });
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
       } catch (e) {
         console.warn("Frame drop", e);
       }
-      if (isCapturing) setTimeout(captureFrame, 66);
+      if (isCapturing) rafId = requestAnimationFrame(captureFrame);
     };
-    captureFrame();
+    rafId = requestAnimationFrame(captureFrame);
 
     try {
       await playAnimation();
     } finally {
       isCapturing = false;
+      if (rafId !== null) cancelAnimationFrame(rafId);
       setTimeout(() => {
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: "video/webm" });
@@ -1231,9 +1238,10 @@ export default function ChatStoryGenerator() {
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
+        <div className="relative" style={{ width: 400, height: 711 }}>
         <div
           ref={previewRef}
-          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
+          className="rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
@@ -1335,8 +1343,9 @@ export default function ChatStoryGenerator() {
                 return (
                 <motion.div
                   key={m.id}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 20 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: recording ? 0 : 0.3 }}
                   className={`flex flex-col ${isWA ? "mb-1.5" : "mb-1"} ${
                     m.side === "2" ? "items-end" : "items-start"
                   }`}
@@ -1418,6 +1427,7 @@ export default function ChatStoryGenerator() {
               />
             </div>
           )}
+          </div>
           </div>
           <Button
             onClick={recordVideo}
