@@ -134,9 +134,12 @@ export default function ChatStoryGenerator() {
     let id = 0;
     let header = activeChat.contactName;
     for (const line of lines) {
-      const headerMatch = line.match(/^-\s*(?:Header|iMessage)\s*:\s*(.+)$/i);
+      const headerMatch = line.match(/^-\s*(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i);
       if (headerMatch) {
-        header = headerMatch[1].trim();
+        const kind = headerMatch[1].toLowerCase();
+        header = headerMatch[2].trim();
+        if (kind === "imessage") setChatTheme("imessage");
+        else if (kind === "whatsapp") setChatTheme("whatsapp");
         continue;
       }
       const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
