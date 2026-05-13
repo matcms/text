@@ -1724,6 +1724,7 @@ export default function ChatStoryGenerator() {
             </AnimatePresence>
           </div>
         </div>
+        </div>
           {recording && (
             <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
               <Loader2 className="h-8 w-8 animate-spin text-white" />
