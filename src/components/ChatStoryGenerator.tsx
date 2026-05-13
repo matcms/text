@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import html2canvas from "html2canvas";
+import { toCanvas } from "html-to-image";
+import { Progress } from "@/components/ui/progress";
 
 // Render text with (parens) replaced by a censored block (audio keeps the word)
 const renderCensored = (text: string) => {
