@@ -49,7 +49,7 @@ type Chat = {
 
 type ChatTheme = "imessage" | "whatsapp";
 
-const DEFAULT_SCRIPT = `- Header: Nate
+const DEFAULT_SCRIPT = `- iMessage: Nate
 1: Adam> Dude, we're seriously screwed.
 1: Adam> Cancel the Christmas turkey.
 1: img: police cruiser on the street
