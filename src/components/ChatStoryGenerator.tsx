@@ -592,27 +592,93 @@ export default function ChatStoryGenerator() {
           Parse Script
         </Button>
 
+        {/* Voice library */}
+        <div className="space-y-3 rounded-lg border p-4">
+          <h2 className="font-semibold text-sm">Biblioteca de vozes</h2>
+          <p className="text-xs text-muted-foreground">
+            Salve aqui as vozes que você usa com frequência. Depois é só selecionar pelo nome ao mapear personagens.
+          </p>
+          <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
+            <Input
+              placeholder="Nome (ex: Adam)"
+              value={newVoiceName}
+              onChange={(e) => setNewVoiceName(e.target.value)}
+            />
+            <Input
+              className="font-mono text-xs"
+              placeholder="voice_id"
+              value={newVoiceId}
+              onChange={(e) => setNewVoiceId(e.target.value)}
+            />
+            <Button size="sm" onClick={addSavedVoice}>
+              <Plus className="h-3 w-3 mr-1" /> Salvar
+            </Button>
+          </div>
+          {savedVoices.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              {savedVoices.map((v) => (
+                <div key={v.name} className="flex items-center gap-2 text-xs">
+                  <span className="font-medium w-24 truncate">{v.name}</span>
+                  <code className="flex-1 truncate text-muted-foreground">{v.voiceId}</code>
+                  <button
+                    onClick={() => removeSavedVoice(v.name)}
+                    className="opacity-60 hover:opacity-100"
+                    aria-label="Remove"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {Object.keys(activeChat.voiceMap).length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
             <h2 className="font-semibold text-sm">Voice IDs por personagem</h2>
             <p className="text-xs text-muted-foreground">
-              Cole o <code>voice_id</code> do ElevenLabs para cada personagem detectado no script.
+              Adicione manualmente um <code>voice_id</code> ou selecione uma voz já salva na biblioteca.
             </p>
-            {Object.keys(activeChat.voiceMap).map((name) => (
-              <div key={name} className="grid grid-cols-3 gap-2 items-center">
-                <Label className="col-span-1 truncate">{name}</Label>
-                <Input
-                  className="col-span-2 font-mono text-xs"
-                  placeholder="voice_id (ex: 21m00Tcm4TlvDq8ikWAM)"
-                  value={activeChat.voiceMap[name]}
-                  onChange={(e) =>
-                    updateActiveChat({
-                      voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
-                    })
-                  }
-                />
-              </div>
-            ))}
+            {Object.keys(activeChat.voiceMap).map((name) => {
+              const currentId = activeChat.voiceMap[name];
+              const matched = savedVoices.find((v) => v.voiceId === currentId);
+              return (
+                <div key={name} className="space-y-1.5 border-b last:border-b-0 pb-3 last:pb-0">
+                  <Label className="text-xs">{name}</Label>
+                  <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="Adicionar voice_id manualmente"
+                      value={currentId}
+                      onChange={(e) =>
+                        updateActiveChat({
+                          voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
+                        })
+                      }
+                    />
+                    <select
+                      className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+                      value={matched?.name || ""}
+                      onChange={(e) => {
+                        const sel = savedVoices.find((v) => v.name === e.target.value);
+                        if (sel) {
+                          updateActiveChat({
+                            voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
+                          });
+                        }
+                      }}
+                    >
+                      <option value="">Selecionar voz...</option>
+                      {savedVoices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
