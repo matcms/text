@@ -1534,7 +1534,10 @@ export default function ChatStoryGenerator() {
                         }`}
                       >
                         {showName && (
-                          <span className="text-[13px] font-bold text-[#53bdeb] mb-0.5 capitalize block">
+                          <span
+                            className="text-[13px] font-bold mb-0.5 capitalize block"
+                            style={{ color: nameColor || "#53bdeb" }}
+                          >
                             {senderName}
                           </span>
                         )}
