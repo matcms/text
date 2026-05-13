@@ -391,12 +391,17 @@ export default function ChatStoryGenerator() {
         }
         const textMatch = line.match(/^(\d):\s*(.+?)>\s*(.*)$/);
         if (textMatch) {
+          const raw = textMatch[3];
+          const sepIdx = raw.indexOf("==");
+          const displayText = sepIdx >= 0 ? raw.slice(0, sepIdx).trim() : raw;
+          const spokenText = sepIdx >= 0 ? raw.slice(sepIdx + 2).trim() : undefined;
           parsed.push({
             id: id++,
             side: textMatch[1],
             type: "text",
             voiceName: textMatch[2].trim(),
-            text: textMatch[3],
+            text: displayText,
+            spokenText,
             audioUrl: null,
           });
         }
