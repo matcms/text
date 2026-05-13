@@ -803,62 +803,92 @@ export default function ChatStoryGenerator() {
 
           const totalMsgs = chats.reduce((acc, ch) => acc + ch.messages.length, 0);
           const doneSoFar = chats.slice(0, c).reduce((acc, ch) => acc + ch.messages.length, 0) + i + 1;
-          setExportProgress(2 + (doneSoFar / totalMsgs) * 58);
+          setExportProgress(2 + (doneSoFar / totalMsgs) * 50);
         }
       }
 
       setPlayingChatId(null);
       setVisibleMessages([]);
-      setExportProgress(62);
+      setExportProgress(55);
 
-      const worker = new Worker(
-        new URL("../workers/videoRenderer.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-
-      await new Promise<void>((resolve, reject) => {
-        worker.onmessage = (e) => { if (e.data.type === "ready") resolve(); };
-        worker.onerror = (e) => reject(new Error(e.message));
-        worker.postMessage({ type: "init" });
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on("progress", ({ progress }) => {
+        setExportProgress(80 + progress * 18);
       });
 
-      setExportProgress(65);
+      await ffmpeg.load({
+        coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js",
+        wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
+      });
+
+      setExportProgress(60);
 
       for (let i = 0; i < frames.length; i++) {
-        worker.postMessage({ type: "frame", png: frames[i], index: i }, [frames[i].buffer]);
-        if (i % 30 === 0) {
-          setExportProgress(65 + ((i / frames.length) * 15));
+        await ffmpeg.writeFile(`frame_${String(i).padStart(6, "0")}.png`, frames[i]);
+        if (i % 20 === 0) {
+          setExportProgress(60 + (i / frames.length) * 15);
           await new Promise((r) => setTimeout(r, 0));
         }
       }
 
-      setExportProgress(80);
+      setExportProgress(75);
 
-      const segMeta: { index: number; startMs: number; durationMs: number }[] = [];
       for (const seg of audioSegments) {
         const buf = await seg.blob.arrayBuffer();
-        const mp3 = new Uint8Array(buf);
-        worker.postMessage({ type: "audio", mp3, index: seg.index }, [mp3.buffer]);
-        segMeta.push({ index: seg.index, startMs: seg.startMs, durationMs: seg.durationMs });
+        await ffmpeg.writeFile(`audio_${seg.index}.mp3`, new Uint8Array(buf));
       }
 
-      setExportProgress(83);
+      await ffmpeg.exec([
+        "-framerate", String(FPS),
+        "-i", "frame_%06d.png",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "fast",
+        "-crf", "18",
+        "video_silent.mp4",
+      ]);
 
-      const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
+      setExportProgress(90);
 
-      const mp4 = await new Promise<Uint8Array>((resolve, reject) => {
-        worker.onmessage = (e) => {
-          if (e.data.type === "progress") setExportProgress(83 + (e.data.percent * 0.15));
-          else if (e.data.type === "done") resolve(e.data.mp4 as Uint8Array);
-          else if (e.data.type === "error") reject(new Error(e.data.message));
-        };
-        worker.postMessage({ type: "render", fps: FPS, totalFrames: frames.length, audioSegments: segMeta, projectName: safeName });
-      });
+      let finalFile = "video_silent.mp4";
 
-      worker.terminate();
+      if (audioSegments.length > 0) {
+        const inputArgs: string[] = ["-i", "video_silent.mp4"];
+        const filterParts: string[] = [];
+        const mixInputs: string[] = [];
+
+        for (let i = 0; i < audioSegments.length; i++) {
+          const seg = audioSegments[i];
+          inputArgs.push("-i", `audio_${seg.index}.mp3`);
+          filterParts.push(`[${i + 1}:a]adelay=${seg.startMs}|${seg.startMs}[a${i}]`);
+          mixInputs.push(`[a${i}]`);
+        }
+
+        const filterComplex =
+          filterParts.join(";") + ";" +
+          mixInputs.join("") +
+          `amix=inputs=${audioSegments.length}:normalize=0[aout]`;
+
+        await ffmpeg.exec([
+          ...inputArgs,
+          "-filter_complex", filterComplex,
+          "-map", "0:v",
+          "-map", "[aout]",
+          "-c:v", "copy",
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-shortest",
+          "output.mp4",
+        ]);
+
+        finalFile = "output.mp4";
+      }
+
+      const data = await ffmpeg.readFile(finalFile) as Uint8Array;
       setExportProgress(100);
 
-      const blob = new Blob([mp4 as BlobPart], { type: "video/mp4" });
+      const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
+      const blob = new Blob([data as BlobPart], { type: "video/mp4" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -867,10 +897,10 @@ export default function ChatStoryGenerator() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
     } catch (err) {
       console.error("Erro ao renderizar vídeo:", err);
-      console.error("Detalhes do erro:", err);
-      alert(`Erro ao gerar vídeo:\n${err instanceof Error ? err.stack || err.message : JSON.stringify(err)}`);
+      alert(`Erro ao gerar vídeo: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       recordingCtxRef.current = null;
       exportProgressRef.current = null;
