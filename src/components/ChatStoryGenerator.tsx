@@ -556,7 +556,7 @@ export default function ChatStoryGenerator() {
             onChange={(e) => updateActiveChat({ script: e.target.value })}
           />
           <p className="text-xs text-muted-foreground">
-            Formato: <code>- Header: nome</code> e linhas <code>1: NomeDaVoz&gt; texto</code>.
+            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template automaticamente) e linhas <code>1: NomeDaVoz&gt; texto</code>.
           </p>
         </div>
 
