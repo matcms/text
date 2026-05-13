@@ -1504,15 +1504,36 @@ export default function ChatStoryGenerator() {
           </div>
         )}
 
-        <Button
-          onClick={() => playAnimation()}
-          disabled={!allAudiosReady || playing || recording}
-          className="w-full"
-          size="lg"
-        >
-          <Play className="mr-2 h-4 w-4" />
-          Play vídeo (todos os chats)
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => playAnimation()}
+            disabled={!allAudiosReady || playing || recording}
+            className="flex-1"
+            size="lg"
+          >
+            <Play className="mr-2 h-4 w-4" />
+            Play vídeo (todos os chats)
+          </Button>
+          {(playing || recording) && (
+            <Button
+              onClick={togglePause}
+              variant="secondary"
+              size="lg"
+            >
+              {paused ? (
+                <>
+                  <Play className="mr-2 h-4 w-4" />
+                  Continuar
+                </>
+              ) : (
+                <>
+                  <Pause className="mr-2 h-4 w-4" />
+                  Pausar
+                </>
+              )}
+            </Button>
+          )}
+        </div>
 
       </div>
 
