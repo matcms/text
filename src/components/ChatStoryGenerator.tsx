@@ -68,6 +68,7 @@ type TextMsg = {
   side: string;
   type: "text";
   voiceName: string;
+  displayName?: string;
   text: string;
   spokenText?: string;
   audioUrl: string | null;
