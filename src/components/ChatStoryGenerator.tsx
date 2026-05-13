@@ -1,5 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import html2canvas from "html2canvas";
+
+// Render text with (parens) replaced by a censored block (audio keeps the word)
+const renderCensored = (text: string) => {
+  const parts = text.split(/(\([^)]*\))/g);
+  return parts.map((p, i) => {
+    const m = p.match(/^\(([^)]*)\)$/);
+    if (m) {
+      return (
+        <span
+          key={i}
+          className="inline-block align-middle rounded px-1 mx-0.5 select-none"
+          style={{
+            backgroundColor: "#111",
+            color: "transparent",
+            textShadow: "none",
+            filter: "blur(0.5px)",
+          }}
+        >
+          {m[1]}
+        </span>
+      );
+    }
+    return <span key={i}>{p}</span>;
+  });
+};
+const stripCensors = (text: string) => text.replace(/[()]/g, "");
 import {
   ChevronLeft,
   Video,
@@ -128,6 +155,12 @@ export default function ChatStoryGenerator() {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const recordingCtxRef = useRef<{
+    audioCtx: AudioContext;
+    dest: MediaStreamAudioDestinationNode;
+  } | null>(null);
+  const [recording, setRecording] = useState(false);
 
   // Persist keys
   useEffect(() => {
@@ -361,7 +394,7 @@ export default function ChatStoryGenerator() {
         return;
       }
       try {
-        const audioUrl = await ttsElevenLabs(msg.text, voiceId);
+        const audioUrl = await ttsElevenLabs(stripCensors(msg.text), voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
@@ -406,9 +439,22 @@ export default function ChatStoryGenerator() {
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
-          const audio = new Audio(msg.audioUrl);
-          audio.play();
-          await new Promise((r) => (audio.onended = () => r(null)));
+          const rec = recordingCtxRef.current;
+          if (rec) {
+            // route audio through MediaStreamDestination so MediaRecorder captures it
+            const buf = await fetch(msg.audioUrl).then((r) => r.arrayBuffer());
+            const audioBuf = await rec.audioCtx.decodeAudioData(buf.slice(0));
+            const src = rec.audioCtx.createBufferSource();
+            src.buffer = audioBuf;
+            src.connect(rec.dest);
+            src.connect(rec.audioCtx.destination);
+            src.start();
+            await new Promise((r) => (src.onended = () => r(null)));
+          } else {
+            const audio = new Audio(msg.audioUrl);
+            audio.play();
+            await new Promise((r) => (audio.onended = () => r(null)));
+          }
           if (Number(messageDelay) > 0) {
             await new Promise((r) => setTimeout(r, Number(messageDelay)));
           }
@@ -423,6 +469,83 @@ export default function ChatStoryGenerator() {
     }
     setPlayingChatId(null);
     setPlaying(false);
+  };
+
+  const recordVideo = async () => {
+    const target = previewRef.current;
+    if (!target) return;
+    if (!allAudiosReady) {
+      alert("Gere os áudios primeiro.");
+      return;
+    }
+    setRecording(true);
+    const W = target.offsetWidth;
+    const H = target.offsetHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+    recordingCtxRef.current = { audioCtx, dest };
+
+    const videoStream = canvas.captureStream(30);
+    const combined = new MediaStream([
+      ...videoStream.getVideoTracks(),
+      ...dest.stream.getAudioTracks(),
+    ]);
+    const mimeCandidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const recorder = new MediaRecorder(combined, { mimeType: mime });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.start(100);
+
+    let drawing = true;
+    const drawLoop = async () => {
+      while (drawing) {
+        try {
+          const snap = await html2canvas(target, {
+            backgroundColor: null,
+            scale: 1,
+            logging: false,
+            useCORS: true,
+          });
+          ctx.drawImage(snap, 0, 0, W, H);
+        } catch (err) {
+          console.error(err);
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    };
+    drawLoop();
+
+    try {
+      await playAnimation();
+    } finally {
+      drawing = false;
+      await new Promise((r) => setTimeout(r, 400));
+      recorder.stop();
+      await new Promise((r) => (recorder.onstop = () => r(null)));
+      try { audioCtx.close(); } catch {}
+      recordingCtxRef.current = null;
+
+      const blob = new Blob(chunks, { type: "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chat-story-${Date.now()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setRecording(false);
+    }
   };
 
   const addChat = () => {
@@ -872,19 +995,40 @@ export default function ChatStoryGenerator() {
 
         <Button
           onClick={playAnimation}
-          disabled={!allAudiosReady || playing}
+          disabled={!allAudiosReady || playing || recording}
           className="w-full"
           size="lg"
         >
           <Play className="mr-2 h-4 w-4" />
           Play vídeo (todos os chats)
         </Button>
+
+        <Button
+          onClick={recordVideo}
+          disabled={!allAudiosReady || playing || recording}
+          className="w-full"
+          size="lg"
+          variant="secondary"
+        >
+          {recording ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Gravando vídeo...
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4 rotate-180" />
+              Baixar vídeo (.webm)
+            </>
+          )}
+        </Button>
       </div>
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 min-h-screen bg-background">
         <div
-          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col"
+          ref={previewRef}
+          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
@@ -1011,7 +1155,7 @@ export default function ChatStoryGenerator() {
                             {senderName}
                           </span>
                         )}
-                        {m.text}
+                        {renderCensored(m.text)}
                       </div>
                     ) : (
                       <div
@@ -1021,7 +1165,7 @@ export default function ChatStoryGenerator() {
                             : "bg-[#262628] rounded-2xl"
                         }`}
                       >
-                        {m.text}
+                        {renderCensored(m.text)}
                       </div>
                     )
                   ) : m.imageUrl ? (
