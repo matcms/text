@@ -1393,7 +1393,59 @@ export default function ChatStoryGenerator() {
             </AnimatePresence>
           </div>
         </div>
-      </div>
-    </div>
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="projects" className="mt-0 p-8 bg-background min-h-[calc(100vh-60px)]">
+        <div className="max-w-4xl mx-auto space-y-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Meus Projetos</h2>
+            <p className="text-sm text-muted-foreground">
+              Projetos salvos localmente com áudios e imagens incluídos.
+            </p>
+          </div>
+          {projects.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
+              Nenhum projeto salvo ainda. Salve um projeto na aba Editor.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((p) => {
+                const totalMsgs = p.chats.reduce((acc, c) => acc + c.messages.length, 0);
+                return (
+                  <div
+                    key={p.id}
+                    className="rounded-lg border p-4 space-y-3 bg-card hover:shadow-md transition"
+                  >
+                    <div>
+                      <div className="font-semibold truncate">{p.projectName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(p.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {p.chats.length} chat(s) • {totalMsgs} mensagens • tema {p.theme}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => handleLoadProject(p)} className="flex-1">
+                        <FolderOpen className="h-3 w-3 mr-1" /> Carregar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleDeleteProject(p.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }
