@@ -87,6 +87,7 @@ type Chat = {
   script: string;
   messages: Msg[];
   voiceMap: Record<string, string>;
+  isGroupChat?: boolean;
 };
 
 type ChatTheme = "imessage" | "whatsapp";
@@ -106,6 +107,7 @@ const newChat = (i: number): Chat => ({
   script: DEFAULT_SCRIPT,
   messages: [],
   voiceMap: {},
+  isGroupChat: false,
 });
 
 // Convert base64 (mp3) to blob URL
