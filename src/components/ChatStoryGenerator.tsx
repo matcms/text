@@ -433,6 +433,40 @@ export default function ChatStoryGenerator() {
           </div>
 
           <div className="space-y-2">
+            <Label>Chat Mode</Label>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant={!isGroupChat ? "default" : "outline"}
+                onClick={() => setIsGroupChat(false)}
+              >
+                Direct Message
+              </Button>
+              <Button
+                size="sm"
+                variant={isGroupChat ? "default" : "outline"}
+                onClick={() => setIsGroupChat(true)}
+              >
+                Group Chat
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Message Delay (ms)</Label>
+            <Input
+              type="number"
+              min={0}
+              step={50}
+              value={messageDelay}
+              onChange={(e) => setMessageDelay(Math.max(0, Number(e.target.value) || 0))}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Pausa adicional após cada áudio terminar (0 = sem pausa).
+            </p>
+
+          <div className="space-y-2">
             <Label>ElevenLabs API Key</Label>
             <Input
               type="password"
