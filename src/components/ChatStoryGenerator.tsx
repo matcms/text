@@ -868,7 +868,8 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err) {
       console.error("Erro ao renderizar vídeo:", err);
-      alert(`Erro ao gerar vídeo: ${String(err)}`);
+      console.error("Detalhes do erro:", err);
+      alert(`Erro ao gerar vídeo:\n${err instanceof Error ? err.stack || err.message : JSON.stringify(err)}`);
     } finally {
       recordingCtxRef.current = null;
       exportProgressRef.current = null;
