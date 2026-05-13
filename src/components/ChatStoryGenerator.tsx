@@ -439,9 +439,22 @@ export default function ChatStoryGenerator() {
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
-          const audio = new Audio(msg.audioUrl);
-          audio.play();
-          await new Promise((r) => (audio.onended = () => r(null)));
+          const rec = recordingCtxRef.current;
+          if (rec) {
+            // route audio through MediaStreamDestination so MediaRecorder captures it
+            const buf = await fetch(msg.audioUrl).then((r) => r.arrayBuffer());
+            const audioBuf = await rec.audioCtx.decodeAudioData(buf.slice(0));
+            const src = rec.audioCtx.createBufferSource();
+            src.buffer = audioBuf;
+            src.connect(rec.dest);
+            src.connect(rec.audioCtx.destination);
+            src.start();
+            await new Promise((r) => (src.onended = () => r(null)));
+          } else {
+            const audio = new Audio(msg.audioUrl);
+            audio.play();
+            await new Promise((r) => (audio.onended = () => r(null)));
+          }
           if (Number(messageDelay) > 0) {
             await new Promise((r) => setTimeout(r, Number(messageDelay)));
           }
