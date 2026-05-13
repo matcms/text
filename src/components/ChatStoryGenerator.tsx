@@ -1766,6 +1766,7 @@ export default function ChatStoryGenerator() {
             )}
           </Button>
         </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="projects" className="mt-0 p-8 bg-background min-h-[calc(100vh-60px)]">
