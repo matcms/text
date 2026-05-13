@@ -90,7 +90,7 @@ export default function ChatStoryGenerator() {
   const [playing, setPlaying] = useState(false);
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
 
-  const [messagePauseSec, setMessagePauseSec] = useState(0.3);
+  
   const [messageDelay, setMessageDelay] = useState(0);
   const [isGroupChat, setIsGroupChat] = useState(false);
 
