@@ -1343,8 +1343,9 @@ export default function ChatStoryGenerator() {
                 return (
                 <motion.div
                   key={m.id}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 20 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: recording ? 0 : 0.3 }}
                   className={`flex flex-col ${isWA ? "mb-1.5" : "mb-1"} ${
                     m.side === "2" ? "items-end" : "items-start"
                   }`}
