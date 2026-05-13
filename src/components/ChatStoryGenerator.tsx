@@ -680,6 +680,11 @@ export default function ChatStoryGenerator() {
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         scrollDown();
         if (msg.type === "text" && msg.audioUrl) {
+          // Yield to React so DOM updates and auto-scroll happens BEFORE audio
+          await new Promise((r) => setTimeout(r, 100));
+          scrollDown();
+          await new Promise((r) => setTimeout(r, 100));
+
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
           if (rec) {
@@ -691,15 +696,32 @@ export default function ChatStoryGenerator() {
               console.error("audio routing failed", err);
             }
           }
+
+          // Workaround for Chrome's Infinity duration bug on Blob URLs
           await new Promise<void>((resolve) => {
-            if (audio.readyState >= 1) resolve();
-            else
-              audio.addEventListener("loadedmetadata", () => resolve(), {
-                once: true,
-              });
+            const onReady = () => {
+              if (!isFinite(audio.duration) || isNaN(audio.duration)) {
+                audio.currentTime = 1e101;
+                audio.addEventListener(
+                  "timeupdate",
+                  () => {
+                    audio.currentTime = 0;
+                    resolve();
+                  },
+                  { once: true },
+                );
+              } else {
+                resolve();
+              }
+            };
+            audio.addEventListener("loadedmetadata", onReady, { once: true });
+            if (audio.readyState >= 1) onReady();
           });
+
           audio.play().catch((err) => console.error("audio play failed", err));
-          const durationMs = (audio.duration || 0) * 1000;
+
+          let durationMs = (audio.duration || 0) * 1000;
+          if (!isFinite(durationMs) || durationMs <= 0) durationMs = 2000;
           const waitTime = Math.max(0, durationMs + delayMs);
           await new Promise((r) => setTimeout(r, waitTime));
         }
