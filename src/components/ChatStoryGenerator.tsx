@@ -155,6 +155,12 @@ export default function ChatStoryGenerator() {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const recordingCtxRef = useRef<{
+    audioCtx: AudioContext;
+    dest: MediaStreamAudioDestinationNode;
+  } | null>(null);
+  const [recording, setRecording] = useState(false);
 
   // Persist keys
   useEffect(() => {
