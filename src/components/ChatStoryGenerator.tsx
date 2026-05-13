@@ -594,13 +594,16 @@ export default function ChatStoryGenerator() {
           });
           audio.play().catch((err) => console.error("audio play failed", err));
           const durationMs = (audio.duration || 0) * 1000;
-          // Negative delay overlaps next message into the tail of the audio.
           const waitTime = Math.max(0, durationMs + delayMs);
           await new Promise((r) => setTimeout(r, waitTime));
-          // Do NOT stop the audio: it keeps playing while the next message appears.
         }
         if (msg.type === "image") {
           await new Promise((r) => setTimeout(r, 2000));
+        }
+        if (exportProgressRef.current) {
+          exportProgressRef.current.done += 1;
+          const { done, total } = exportProgressRef.current;
+          setExportProgress(total ? (done / total) * 100 : 0);
         }
       }
     }
