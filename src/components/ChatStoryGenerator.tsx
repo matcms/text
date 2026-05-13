@@ -1,5 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import html2canvas from "html2canvas";
+
+// Render text with (parens) replaced by a censored block (audio keeps the word)
+const renderCensored = (text: string) => {
+  const parts = text.split(/(\([^)]*\))/g);
+  return parts.map((p, i) => {
+    const m = p.match(/^\(([^)]*)\)$/);
+    if (m) {
+      return (
+        <span
+          key={i}
+          className="inline-block align-middle rounded px-1 mx-0.5 select-none"
+          style={{
+            backgroundColor: "#111",
+            color: "transparent",
+            textShadow: "none",
+            filter: "blur(0.5px)",
+          }}
+        >
+          {m[1]}
+        </span>
+      );
+    }
+    return <span key={i}>{p}</span>;
+  });
+};
+const stripCensors = (text: string) => text.replace(/[()]/g, "");
 import {
   ChevronLeft,
   Video,
