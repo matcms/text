@@ -1459,7 +1459,7 @@ export default function ChatStoryGenerator() {
         )}
 
         <Button
-          onClick={playAnimation}
+          onClick={() => playAnimation()}
           disabled={!allAudiosReady || playing || recording}
           className="w-full"
           size="lg"
