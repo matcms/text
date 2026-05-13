@@ -92,7 +92,22 @@ type Chat = {
   messages: Msg[];
   voiceMap: Record<string, string>;
   isGroupChat?: boolean;
+  groupSubtitle?: string;
+  nameColors?: Record<string, string>;
 };
+
+const NAME_COLOR_OPTIONS: { label: string; value: string }[] = [
+  { label: "Padrão", value: "" },
+  { label: "Roxo", value: "#a855f7" },
+  { label: "Laranja", value: "#f97316" },
+  { label: "Azul", value: "#53bdeb" },
+  { label: "Vermelho", value: "#ef4444" },
+  { label: "Rosa", value: "#ec4899" },
+  { label: "Marrom", value: "#92400e" },
+  { label: "Verde claro", value: "#4ade80" },
+  { label: "Verde escuro", value: "#15803d" },
+  { label: "Amarelo", value: "#facc15" },
+];
 
 type ChatTheme = "imessage" | "whatsapp";
 
@@ -112,6 +127,8 @@ const newChat = (i: number): Chat => ({
   messages: [],
   voiceMap: {},
   isGroupChat: false,
+  groupSubtitle: "tap here for group info",
+  nameColors: {},
 });
 
 // Convert base64 (mp3) to blob URL
@@ -1183,6 +1200,60 @@ export default function ChatStoryGenerator() {
           </div>
         )}
 
+        {(() => {
+          const isGroup = activeChat.isGroupChat ?? isGroupChat;
+          if (!isGroup) return null;
+          const displayNames = Array.from(
+            new Set(
+              activeChat.messages
+                .filter((m): m is TextMsg => m.type === "text")
+                .map((m) => m.displayName)
+                .filter((n): n is string => !!n)
+            )
+          );
+          if (displayNames.length === 0) return null;
+          const colors = activeChat.nameColors || {};
+          return (
+            <div className="space-y-3 rounded-lg border p-4">
+              <h2 className="font-semibold text-sm">Cores dos nomes (Group Chat)</h2>
+              <p className="text-xs text-muted-foreground">
+                Escolha a cor do nome exibido acima das mensagens no chat de grupo.
+              </p>
+              {displayNames.map((name) => {
+                const current = colors[name] || "";
+                return (
+                  <div key={name} className="flex items-center gap-2">
+                    <Label className="text-xs w-24 truncate capitalize">{name}</Label>
+                    <div
+                      className="h-5 w-5 rounded-full border"
+                      style={{
+                        backgroundColor:
+                          current ||
+                          (chatTheme === "whatsapp" ? "#53bdeb" : "#8e8e93"),
+                      }}
+                    />
+                    <select
+                      className="h-9 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
+                      value={current}
+                      onChange={(e) =>
+                        updateActiveChat({
+                          nameColors: { ...colors, [name]: e.target.value },
+                        })
+                      }
+                    >
+                      {NAME_COLOR_OPTIONS.map((opt) => (
+                        <option key={opt.label} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         <Button
           onClick={generateAudios}
           disabled={generating}
@@ -1399,7 +1470,17 @@ export default function ChatStoryGenerator() {
                   {displayChat.contactName}
                 </span>
                 <span className="text-[12px] text-[#8696a0] leading-tight">
-                  {effectiveGroupChat ? "tap here for group info" : "Online"}
+                  {effectiveGroupChat ? (
+                    <input
+                      value={displayChat.groupSubtitle ?? "tap here for group info"}
+                      onChange={(e) =>
+                        updateChatById(displayChat.id, { groupSubtitle: e.target.value })
+                      }
+                      className="bg-transparent border-none outline-none text-[12px] text-[#8696a0] w-full p-0"
+                    />
+                  ) : (
+                    "Online"
+                  )}
                 </span>
               </div>
               <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
@@ -1475,6 +1556,10 @@ export default function ChatStoryGenerator() {
                   m.side === "1" &&
                   m.type === "text" &&
                   !!m.displayName;
+                const nameColor =
+                  m.type === "text" && m.displayName
+                    ? displayChat.nameColors?.[m.displayName] || ""
+                    : "";
                 return (
                 <motion.div
                   key={m.id}
@@ -1486,7 +1571,10 @@ export default function ChatStoryGenerator() {
                   }`}
                 >
                   {!isWA && showName && (
-                    <span className="text-[11px] text-[#8e8e93] mb-0.5 ml-3 capitalize block">
+                    <span
+                      className="text-[11px] mb-0.5 ml-3 capitalize block"
+                      style={{ color: nameColor || "#8e8e93" }}
+                    >
                       {senderName}
                     </span>
                   )}
@@ -1500,7 +1588,10 @@ export default function ChatStoryGenerator() {
                         }`}
                       >
                         {showName && (
-                          <span className="text-[13px] font-bold text-[#53bdeb] mb-0.5 capitalize block">
+                          <span
+                            className="text-[13px] font-bold mb-0.5 capitalize block"
+                            style={{ color: nameColor || "#53bdeb" }}
+                          >
                             {senderName}
                           </span>
                         )}
