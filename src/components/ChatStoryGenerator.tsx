@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toCanvas } from "html-to-image";
+import { Muxer, ArrayBufferTarget } from "webm-muxer";
 import { Progress } from "@/components/ui/progress";
 
 // Render text with (parens) replaced by a censored block (audio keeps the word)
@@ -765,119 +766,213 @@ export default function ChatStoryGenerator() {
   };
 
   const recordVideo = async () => {
-    const target = previewRef.current;
-    if (!target) return;
+    if (!previewRef.current) return;
     if (!allAudiosReady) {
       alert("Gere os áudios primeiro.");
       return;
     }
-    setRecording(true);
-    setExportProgress(0);
-    const totalMessages = chats.reduce((acc, c) => acc + c.messages.length, 0);
-    exportProgressRef.current = { done: 0, total: totalMessages };
 
-    const SCALE = 2;
-    const W = (target.offsetWidth || 400) * SCALE;
-    const H = (target.offsetHeight || 711) * SCALE;
+    const messages = displayChat.messages;
+    if (messages.length === 0) return;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext("2d")!;
-
-    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-    const audioCtx = new AC();
-    const audioDest = audioCtx.createMediaStreamDestination();
-    recordingCtxRef.current = { audioCtx, dest: audioDest };
-
-    const FORMATS = [
-      { mime: "video/mp4; codecs=avc1.42E01E,mp4a.40.2", ext: "mp4" },
-      { mime: "video/mp4; codecs=avc1",                  ext: "mp4" },
-      { mime: "video/mp4",                               ext: "mp4" },
-      { mime: "video/webm; codecs=vp9,opus",             ext: "webm" },
-      { mime: "video/webm; codecs=vp8,opus",             ext: "webm" },
-      { mime: "video/webm; codecs=vp8",                  ext: "webm" },
-      { mime: "video/webm",                              ext: "webm" },
-    ];
-    const chosen = FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime));
-    if (!chosen) {
-      alert("Seu navegador não suporta gravação de vídeo. Use o Chrome.");
-      setRecording(false);
+    if (typeof (window as any).VideoEncoder === "undefined") {
+      alert("Seu navegador não suporta WebCodecs. Use Chrome/Edge atualizado.");
       return;
     }
 
-    const canvasStream = canvas.captureStream(30);
-    const combinedStream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...audioDest.stream.getAudioTracks(),
-    ]);
-
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType: chosen.mime,
-      videoBitsPerSecond: 8_000_000,
-      audioBitsPerSecond: 192_000,
-    });
-
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.start(100);
-
-    // Callback sincronizado: captura o frame atual e aguarda antes de continuar
-    const captureFrame = async () => {
-      if (!previewRef.current) return;
-      try {
-        const snap = await toCanvas(previewRef.current, {
-          pixelRatio: SCALE,
-          cacheBust: false,
-          skipFonts: true,
-          style: { transform: "scale(1)", transformOrigin: "top left" },
-        });
-        ctx.clearRect(0, 0, W, H);
-        ctx.drawImage(snap, 0, 0, W, H);
-      } catch (e) {
-        console.warn("Frame drop", e);
-      }
-    };
+    setRecording(true);
+    setExportProgress(1);
 
     try {
-      await playAnimation(captureFrame);
-    } finally {
-      // Captura frame final e aguarda gravar
-      await captureFrame();
-      await new Promise<void>((r) => setTimeout(r, 500));
+      // 1) Decode and mix audio offline
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AC();
+      const buffers: (AudioBuffer | null)[] = [];
+      const timings: number[] = [];
+      const delaySec = (Number(messageDelay) || 0) / 1000;
+      let totalDurationSec = 0;
 
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
-        recorder.stop();
+      for (const msg of messages) {
+        const url = msg.type === "text" ? (msg as any).audioUrl : null;
+        if (!url) {
+          buffers.push(null);
+          const step = Math.max(0.5, delaySec || 0.5);
+          timings.push(step);
+          totalDurationSec += step;
+          continue;
+        }
+        const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        buffers.push(audioBuffer);
+        const step = Math.max(0.1, audioBuffer.duration + delaySec);
+        timings.push(step);
+        totalDurationSec += step;
+      }
+      totalDurationSec += 1;
+
+      const offlineCtx = new OfflineAudioContext(
+        1,
+        Math.ceil(48000 * totalDurationSec),
+        48000,
+      );
+      let acc = 0;
+      for (let i = 0; i < buffers.length; i++) {
+        const b = buffers[i];
+        if (b) {
+          const src = offlineCtx.createBufferSource();
+          src.buffer = b;
+          src.connect(offlineCtx.destination);
+          src.start(acc);
+        }
+        acc += timings[i];
+      }
+      const renderedAudio = await offlineCtx.startRendering();
+      try { audioCtx.close(); } catch {}
+
+      // 2) Setup muxer + encoders
+      const muxer = new Muxer({
+        target: new ArrayBufferTarget(),
+        video: { codec: "V_VP9", width: 1080, height: 1920 },
+        audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
       });
 
-      try { audioCtx.close(); } catch {}
-      recordingCtxRef.current = null;
+      const videoEncoder = new (window as any).VideoEncoder({
+        output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+        error: (e: any) => console.error("Video error:", e),
+      });
+      videoEncoder.configure({
+        codec: "vp09.00.10.08",
+        width: 1080,
+        height: 1920,
+        bitrate: 6_000_000,
+      });
 
-      const blob = new Blob(chunks, { type: chosen.mime });
-      if (blob.size === 0) {
-        alert("O vídeo gerado está vazio. Tente novamente.");
-        setRecording(false);
-        setExportProgress(0);
-        return;
+      const audioEncoder = new (window as any).AudioEncoder({
+        output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
+        error: (e: any) => console.error("Audio error:", e),
+      });
+      audioEncoder.configure({
+        codec: "opus",
+        numberOfChannels: 1,
+        sampleRate: 48000,
+        bitrate: 128_000,
+      });
+
+      // 3) Encode mixed audio
+      const channelData = renderedAudio.getChannelData(0);
+      const audioChunkSize = 48000;
+      for (let i = 0; i < channelData.length; i += audioChunkSize) {
+        const chunk = channelData.slice(i, i + audioChunkSize);
+        const audioData = new (window as any).AudioData({
+          format: "f32-planar",
+          sampleRate: 48000,
+          numberOfFrames: chunk.length,
+          numberOfChannels: 1,
+          timestamp: (i / 48000) * 1_000_000,
+          data: chunk,
+        });
+        audioEncoder.encode(audioData);
+        audioData.close();
       }
 
+      // 4) Render frames
+      setPlayingChatId(activeChatId);
+      setPlaying(true);
+      setVisibleMessages([]);
+      setExportScroll(0);
+      if (chatInnerRef.current) chatInnerRef.current.style.transform = "translateY(0px)";
+      await new Promise((r) => setTimeout(r, 300));
+
+      const fps = 30;
+      let timestampUs = 0;
+      let framesEncoded = 0;
+      const canvas1080 = document.createElement("canvas");
+      canvas1080.width = 1080;
+      canvas1080.height = 1920;
+      const ctx1080 = canvas1080.getContext("2d")!;
+
+      for (let i = 0; i < messages.length; i++) {
+        setExportProgress(10 + (i / messages.length) * 80);
+        setVisibleMessages(messages.slice(0, i + 1));
+        await new Promise((r) => setTimeout(r, 50));
+
+        if (chatOuterRef.current && chatInnerRef.current) {
+          const outer = chatOuterRef.current.clientHeight;
+          const inner = chatInnerRef.current.scrollHeight;
+          if (inner > outer) {
+            chatInnerRef.current.style.transform = `translateY(-${inner - outer + 40}px)`;
+          } else {
+            chatInnerRef.current.style.transform = "translateY(0px)";
+          }
+        }
+        await new Promise((r) => setTimeout(r, 50));
+
+        const tempCanvas = await toCanvas(previewRef.current!, {
+          pixelRatio: 2,
+          cacheBust: true,
+          skipFonts: false,
+        });
+        ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
+        ctx1080.fillRect(0, 0, 1080, 1920);
+        ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
+        tempCanvas.width = 0;
+        tempCanvas.height = 0;
+
+        const durationSec = timings[i] || 0;
+        const framesToEncode = Math.max(1, Math.round(durationSec * fps));
+        const bitmap = await createImageBitmap(canvas1080);
+
+        for (let f = 0; f < framesToEncode; f++) {
+          const frame = new (window as any).VideoFrame(bitmap, { timestamp: timestampUs });
+          videoEncoder.encode(frame, { keyFrame: framesEncoded % 60 === 0 });
+          frame.close();
+          timestampUs += 1_000_000 / fps;
+          framesEncoded++;
+        }
+        bitmap.close();
+      }
+
+      // End padding
+      const endBitmap = await createImageBitmap(canvas1080);
+      for (let f = 0; f < 30; f++) {
+        const frame = new (window as any).VideoFrame(endBitmap, { timestamp: timestampUs });
+        videoEncoder.encode(frame);
+        frame.close();
+        timestampUs += 1_000_000 / fps;
+      }
+      endBitmap.close();
+
+      // 5) Finalize
+      setExportProgress(95);
+      await videoEncoder.flush();
+      await audioEncoder.flush();
+      muxer.finalize();
+
+      const blob = new Blob([muxer.target.buffer], { type: "video/webm" });
+      if (blob.size === 0) {
+        alert("O vídeo gerado está vazio. Tente novamente.");
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${safeName}.${chosen.ext}`;
+      a.download = `${safeName}.webm`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-
-      exportProgressRef.current = null;
+    } catch (err) {
+      console.error("Export Failed:", err);
+      alert("Falha na exportação. Veja o console.");
+    } finally {
       setRecording(false);
       setExportProgress(0);
+      setPlaying(false);
+      setPlayingChatId(null);
+      setVisibleMessages([]);
+      setExportScroll(0);
+      if (chatInnerRef.current) chatInnerRef.current.style.transform = "translateY(0px)";
     }
   };
 
@@ -1638,10 +1733,9 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className="absolute top-0 left-0 w-full flex flex-col justify-end pb-6 min-h-full"
+              className="absolute top-0 left-0 w-full flex flex-col justify-start pb-24 min-h-full"
               style={{
                 transform: `translateY(-${exportScroll}px)`,
-                transition: playing || recording ? "transform 0.15s ease-out" : "none",
               }}
             >
             <AnimatePresence>
