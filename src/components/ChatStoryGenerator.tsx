@@ -712,15 +712,15 @@ export default function ChatStoryGenerator() {
               <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
             </div>
           ) : (
-            <div className="relative bg-[#1c1c1e]/95 backdrop-blur px-4 pt-3 pb-3 border-b border-white/5">
-              <div className="flex items-center gap-1 text-[#0A84FF] absolute left-3 top-1/2 -translate-y-1/2">
-                <ChevronLeft className="h-6 w-6" />
+            <div className="relative bg-black px-4 pt-3 pb-4">
+              <div className="flex items-center gap-1 text-[#0A84FF] absolute left-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full pl-1 pr-3 py-1">
+                <ChevronLeft className="h-5 w-5" />
                 <input
                   value={displayChat.headerTime}
                   onChange={(e) =>
                     updateChatById(displayChat.id, { headerTime: e.target.value })
                   }
-                  className="bg-transparent border-none outline-none text-sm w-10 text-[#0A84FF] p-0"
+                  className="bg-transparent border-none outline-none text-sm w-12 text-white p-0"
                 />
               </div>
               <div className="flex flex-col items-center mx-auto w-fit">
@@ -728,16 +728,21 @@ export default function ChatStoryGenerator() {
                   <img
                     src={displayChat.contactPhoto}
                     alt={displayChat.contactName}
-                    className="w-9 h-9 rounded-full object-cover"
+                    className="w-14 h-14 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-sm font-medium">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center text-white text-xl font-semibold">
                     {displayChat.contactName.charAt(0).toUpperCase()}
                   </div>
                 )}
-                <span className="text-white text-[10px] mt-0.5">{displayChat.contactName}</span>
+                <div className="mt-1 flex items-center gap-1 bg-[#1c1c1e] rounded-full px-3 py-1">
+                  <span className="text-white text-[15px] font-semibold">{displayChat.contactName}</span>
+                  <span className="text-[#8e8e93] text-sm">›</span>
+                </div>
               </div>
-              <Video className="h-5 w-5 text-[#0A84FF] absolute right-3 top-1/2 -translate-y-1/2" />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full p-2">
+                <Video className="h-5 w-5 text-white" />
+              </div>
             </div>
           )}
 
