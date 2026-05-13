@@ -193,8 +193,8 @@ export default function ChatStoryGenerator() {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const chatOuterRef = useRef<HTMLDivElement>(null);
-  const chatInnerRef = useRef<HTMLDivElement>(null);
+  const chatOuterRef = useRef<HTMLDivElement | null>(null);
+  const chatInnerRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const phoneRef = previewRef;
   const recordingCtxRef = useRef<{
