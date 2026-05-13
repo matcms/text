@@ -1314,7 +1314,7 @@ export default function ChatStoryGenerator() {
                 const prev = arr[idx - 1];
                 const senderName = m.type === "text" ? m.voiceName : "";
                 const showName =
-                  isGroupChat &&
+                  effectiveGroupChat &&
                   m.side === "1" &&
                   m.type === "text" &&
                   (idx === 0 ||
