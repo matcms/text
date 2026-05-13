@@ -90,6 +90,8 @@ export default function ChatStoryGenerator() {
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
 
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
+  const [messageDelay, setMessageDelay] = useState(0);
+  const [isGroupChat, setIsGroupChat] = useState(false);
 
   // Voice library (persisted)
   type SavedVoice = { name: string; voiceId: string };
