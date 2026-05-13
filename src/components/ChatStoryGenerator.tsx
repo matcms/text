@@ -49,7 +49,7 @@ type Chat = {
 
 type ChatTheme = "imessage" | "whatsapp";
 
-const DEFAULT_SCRIPT = `- Header: Nate
+const DEFAULT_SCRIPT = `- iMessage: Nate
 1: Adam> Dude, we're seriously screwed.
 1: Adam> Cancel the Christmas turkey.
 1: img: police cruiser on the street
@@ -134,9 +134,12 @@ export default function ChatStoryGenerator() {
     let id = 0;
     let header = activeChat.contactName;
     for (const line of lines) {
-      const headerMatch = line.match(/^-\s*(?:Header|iMessage)\s*:\s*(.+)$/i);
+      const headerMatch = line.match(/^-\s*(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i);
       if (headerMatch) {
-        header = headerMatch[1].trim();
+        const kind = headerMatch[1].toLowerCase();
+        header = headerMatch[2].trim();
+        if (kind === "imessage") setChatTheme("imessage");
+        else if (kind === "whatsapp") setChatTheme("whatsapp");
         continue;
       }
       const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
@@ -329,6 +332,9 @@ export default function ChatStoryGenerator() {
           const audio = new Audio(msg.audioUrl);
           audio.play();
           await new Promise((r) => (audio.onended = () => r(null)));
+        }
+        if (msg.type === "image") {
+          await new Promise((r) => setTimeout(r, 2000));
         }
         if (i < chat.messages.length - 1 && pauseMs > 0) {
           await new Promise((r) => setTimeout(r, pauseMs));
@@ -550,7 +556,7 @@ export default function ChatStoryGenerator() {
             onChange={(e) => updateActiveChat({ script: e.target.value })}
           />
           <p className="text-xs text-muted-foreground">
-            Formato: <code>- Header: nome</code> e linhas <code>1: NomeDaVoz&gt; texto</code>.
+            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template automaticamente) e linhas <code>1: NomeDaVoz&gt; texto</code>.
           </p>
         </div>
 
