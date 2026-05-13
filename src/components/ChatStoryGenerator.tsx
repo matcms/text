@@ -721,15 +721,6 @@ export default function ChatStoryGenerator() {
       onValueChange={(v) => setActiveTab(v as "editor" | "projects")}
       className="min-h-screen"
     >
-      {recording && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center text-white gap-4">
-          <Loader2 className="h-10 w-10 animate-spin" />
-          <div className="text-lg font-semibold">Renderizando vídeo...</div>
-          <div className="text-sm text-white/70">
-            Não feche esta aba. O download começará automaticamente.
-          </div>
-        </div>
-      )}
 
       <div className="border-b bg-background px-6 pt-4">
         <TabsList>
