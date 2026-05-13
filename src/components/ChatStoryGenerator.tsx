@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toCanvas } from "html-to-image";
+import { Muxer, ArrayBufferTarget } from "webm-muxer";
 import { Progress } from "@/components/ui/progress";
 
 // Render text with (parens) replaced by a censored block (audio keeps the word)
