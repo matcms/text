@@ -884,7 +884,9 @@ export default function ChatStoryGenerator() {
                 <span className="text-[17px] font-semibold truncate leading-tight">
                   {displayChat.contactName}
                 </span>
-                <span className="text-[12px] text-[#8696a0] leading-tight">Online</span>
+                <span className="text-[12px] text-[#8696a0] leading-tight">
+                  {isGroupChat ? "tap here for group info" : "Online"}
+                </span>
               </div>
               <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
               <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
