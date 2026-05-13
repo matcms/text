@@ -465,6 +465,7 @@ export default function ChatStoryGenerator() {
             <p className="text-xs text-muted-foreground">
               Pausa adicional após cada áudio terminar (0 = sem pausa).
             </p>
+          </div>
 
           <div className="space-y-2">
             <Label>ElevenLabs API Key</Label>
