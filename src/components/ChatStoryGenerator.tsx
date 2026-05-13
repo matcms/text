@@ -1048,7 +1048,7 @@ export default function ChatStoryGenerator() {
                             : "bg-[#262628] rounded-2xl"
                         }`}
                       >
-                        {m.text}
+                        {renderCensored(m.text)}
                       </div>
                     )
                   ) : m.imageUrl ? (
