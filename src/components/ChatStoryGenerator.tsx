@@ -560,7 +560,7 @@ export default function ChatStoryGenerator() {
         return;
       }
       try {
-        const audioUrl = await ttsElevenLabs(stripCensors(msg.text), voiceId);
+        const audioUrl = await ttsElevenLabs(stripCensors(msg.spokenText ?? msg.text), voiceId);
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
