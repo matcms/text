@@ -162,7 +162,12 @@ export default function ChatStoryGenerator() {
         });
       }
     }
-    updateActiveChat({ contactName: header, messages: parsed });
+    const uniqueNames = Array.from(
+      new Set(parsed.filter((m): m is TextMsg => m.type === "text").map((m) => m.voiceName))
+    );
+    const newMap: Record<string, string> = {};
+    for (const n of uniqueNames) newMap[n] = activeChat.voiceMap[n] || "";
+    updateActiveChat({ contactName: header, messages: parsed, voiceMap: newMap });
     setVisibleMessages([]);
   };
 
