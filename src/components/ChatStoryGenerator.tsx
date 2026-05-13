@@ -539,11 +539,13 @@ export default function ChatStoryGenerator() {
       try { audioCtx.close(); } catch {}
       recordingCtxRef.current = null;
 
-      const blob = new Blob(chunks, { type: "video/webm" });
+      const outType = isMp4 ? "video/mp4" : "video/webm";
+      const ext = isMp4 ? "mp4" : "webm";
+      const blob = new Blob(chunks, { type: outType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `chat-story-${Date.now()}.webm`;
+      a.download = `chat-story-${Date.now()}.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
