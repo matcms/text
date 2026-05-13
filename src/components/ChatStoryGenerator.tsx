@@ -1371,7 +1371,38 @@ export default function ChatStoryGenerator() {
             </AnimatePresence>
           </div>
         </div>
+          {recording && (
+            <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
+              <Loader2 className="h-8 w-8 animate-spin text-white" />
+              <div className="text-white text-sm font-medium">
+                Rendering... {Math.round(exportProgress)}%
+              </div>
+              <Progress
+                value={exportProgress}
+                className="w-full h-2 bg-white/20 [&>div]:bg-emerald-500"
+              />
+            </div>
+          )}
           </div>
+          <Button
+            onClick={recordVideo}
+            disabled={!allAudiosReady || playing || recording}
+            size="lg"
+            style={{ width: 400 }}
+            variant="secondary"
+          >
+            {recording ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Rendering... {Math.round(exportProgress)}%
+              </>
+            ) : (
+              <>
+                <Upload className="mr-2 h-4 w-4 rotate-180" />
+                Export Video
+              </>
+            )}
+          </Button>
         </div>
       </TabsContent>
 
