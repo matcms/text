@@ -53,6 +53,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, RefreshCw } from "lucide-react";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
 import {
   saveProject,
   listProjects,
