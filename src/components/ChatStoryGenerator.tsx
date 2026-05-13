@@ -738,8 +738,11 @@ export default function ChatStoryGenerator() {
     offCanvas.height = H;
     const offCtx = offCanvas.getContext("2d")!;
 
-    const audioSegments: { index: number; startMs: number; durationMs: number; blob: Blob }[] = [];
-    const frames: Uint8Array[] = [];
+    type Segment = { png: Uint8Array; durationMs: number };
+    const segments: Segment[] = [];
+
+    type AudioSeg = { index: number; startMs: number; blob: Blob };
+    const audioSegments: AudioSeg[] = [];
     let currentTimeMs = 0;
 
     const captureFramePng = async (): Promise<Uint8Array> => {
@@ -752,18 +755,11 @@ export default function ChatStoryGenerator() {
       offCtx.clearRect(0, 0, W, H);
       offCtx.drawImage(snap, 0, 0, W, H);
       return new Promise<Uint8Array>((resolve) => {
-        offCanvas.toBlob((blob) => {
-          blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
-        }, "image/png");
+        offCanvas.toBlob(
+          (blob) => blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf))),
+          "image/png"
+        );
       });
-    };
-
-    const holdFrameMs = async (ms: number) => {
-      if (ms <= 0) return;
-      const png = await captureFramePng();
-      const frameCount = Math.max(1, Math.round((ms / 1000) * FPS));
-      for (let i = 0; i < frameCount; i++) frames.push(png);
-      currentTimeMs += ms;
     };
 
     try {
@@ -783,6 +779,8 @@ export default function ChatStoryGenerator() {
           setVisibleMessages([...queue]);
           await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
+          let durationMs = Math.max(300, delayMs);
+
           if (msg.type === "text" && msg.audioUrl) {
             const audioDuration = await new Promise<number>((resolve) => {
               const a = new Audio(msg.audioUrl!);
@@ -793,27 +791,29 @@ export default function ChatStoryGenerator() {
               }
             });
             const mp3Blob = await fetch(msg.audioUrl).then((r) => r.blob());
-            audioSegments.push({ index: audioSegments.length, startMs: currentTimeMs, durationMs: audioDuration, blob: mp3Blob });
-            await holdFrameMs(audioDuration + delayMs);
+            audioSegments.push({ index: audioSegments.length, startMs: currentTimeMs, blob: mp3Blob });
+            durationMs = audioDuration + delayMs;
           } else if (msg.type === "image") {
-            await holdFrameMs(2000 + delayMs);
-          } else {
-            await holdFrameMs(Math.max(300, delayMs));
+            durationMs = 2000 + delayMs;
           }
+
+          const png = await captureFramePng();
+          segments.push({ png, durationMs });
+          currentTimeMs += durationMs;
 
           const totalMsgs = chats.reduce((acc, ch) => acc + ch.messages.length, 0);
           const doneSoFar = chats.slice(0, c).reduce((acc, ch) => acc + ch.messages.length, 0) + i + 1;
-          setExportProgress(2 + (doneSoFar / totalMsgs) * 50);
+          setExportProgress(2 + (doneSoFar / totalMsgs) * 40);
         }
       }
 
       setPlayingChatId(null);
       setVisibleMessages([]);
-      setExportProgress(55);
+      setExportProgress(45);
 
       const ffmpeg = new FFmpeg();
       ffmpeg.on("progress", ({ progress }) => {
-        setExportProgress(80 + progress * 18);
+        setExportProgress(70 + progress * 28);
       });
 
       await ffmpeg.load({
@@ -821,26 +821,42 @@ export default function ChatStoryGenerator() {
         wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm",
       });
 
-      setExportProgress(60);
+      setExportProgress(50);
 
-      for (let i = 0; i < frames.length; i++) {
-        await ffmpeg.writeFile(`frame_${String(i).padStart(6, "0")}.png`, frames[i]);
-        if (i % 20 === 0) {
-          setExportProgress(60 + (i / frames.length) * 15);
-          await new Promise((r) => setTimeout(r, 0));
-        }
+      const concatLines: string[] = [];
+
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const fname = `seg_${i}.png`;
+        await ffmpeg.writeFile(fname, seg.png);
+        const durationSec = (seg.durationMs / 1000).toFixed(4);
+        concatLines.push(`file '${fname}'`);
+        concatLines.push(`duration ${durationSec}`);
+        setExportProgress(50 + (i / segments.length) * 15);
+        await new Promise((r) => setTimeout(r, 0));
       }
 
-      setExportProgress(75);
+      if (segments.length > 0) {
+        concatLines.push(`file 'seg_${segments.length - 1}.png'`);
+      }
+
+      const concatContent = concatLines.join("\n");
+      const encoder = new TextEncoder();
+      await ffmpeg.writeFile("concat.txt", encoder.encode(concatContent));
+
+      setExportProgress(66);
 
       for (const seg of audioSegments) {
         const buf = await seg.blob.arrayBuffer();
         await ffmpeg.writeFile(`audio_${seg.index}.mp3`, new Uint8Array(buf));
       }
 
+      setExportProgress(68);
+
       await ffmpeg.exec([
-        "-framerate", String(FPS),
-        "-i", "frame_%06d.png",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", "concat.txt",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-preset", "fast",
@@ -848,7 +864,7 @@ export default function ChatStoryGenerator() {
         "video_silent.mp4",
       ]);
 
-      setExportProgress(90);
+      setExportProgress(85);
 
       let finalFile = "video_silent.mp4";
 
