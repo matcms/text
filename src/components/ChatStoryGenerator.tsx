@@ -558,6 +558,30 @@ export default function ChatStoryGenerator() {
           Parse Script
         </Button>
 
+        {Object.keys(activeChat.voiceMap).length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold text-sm">Voice IDs por personagem</h2>
+            <p className="text-xs text-muted-foreground">
+              Cole o <code>voice_id</code> do ElevenLabs para cada personagem detectado no script.
+            </p>
+            {Object.keys(activeChat.voiceMap).map((name) => (
+              <div key={name} className="grid grid-cols-3 gap-2 items-center">
+                <Label className="col-span-1 truncate">{name}</Label>
+                <Input
+                  className="col-span-2 font-mono text-xs"
+                  placeholder="voice_id (ex: 21m00Tcm4TlvDq8ikWAM)"
+                  value={activeChat.voiceMap[name]}
+                  onChange={(e) =>
+                    updateActiveChat({
+                      voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Pause control */}
         <div className="space-y-2 rounded-lg border p-4">
           <div className="flex items-center justify-between">
