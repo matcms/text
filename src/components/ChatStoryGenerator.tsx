@@ -1263,7 +1263,7 @@ export default function ChatStoryGenerator() {
                 />
               </div>
               <div className="flex flex-col items-center mx-auto w-fit">
-                {isGroupChat ? (
+                {effectiveGroupChat ? (
                   <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center">
                     <Users className="h-7 w-7 text-white" />
                   </div>
