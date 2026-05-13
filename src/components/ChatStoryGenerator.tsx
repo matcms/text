@@ -1238,9 +1238,10 @@ export default function ChatStoryGenerator() {
 
       {/* RIGHT */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
+        <div className="relative" style={{ width: 400, height: 711 }}>
         <div
           ref={previewRef}
-          className="relative rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
+          className="rounded-[2rem] overflow-hidden shadow-2xl flex flex-col bg-black"
           style={{ width: 400, height: 711 }}
         >
           {/* Header */}
