@@ -91,6 +91,34 @@ export default function ChatStoryGenerator() {
 
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
 
+  // Voice library (persisted)
+  type SavedVoice = { name: string; voiceId: string };
+  const [savedVoices, setSavedVoices] = useState<SavedVoice[]>([]);
+  const [newVoiceName, setNewVoiceName] = useState("");
+  const [newVoiceId, setNewVoiceId] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("saved_voices");
+      if (raw) setSavedVoices(JSON.parse(raw));
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("saved_voices", JSON.stringify(savedVoices));
+  }, [savedVoices]);
+
+  const addSavedVoice = () => {
+    const n = newVoiceName.trim();
+    const v = newVoiceId.trim();
+    if (!n || !v) return;
+    setSavedVoices((p) => [...p.filter((x) => x.name !== n), { name: n, voiceId: v }]);
+    setNewVoiceName("");
+    setNewVoiceId("");
+  };
+  const removeSavedVoice = (name: string) => {
+    setSavedVoices((p) => p.filter((x) => x.name !== name));
+  };
+
   // ElevenLabs voices cache (name -> voice_id)
   const elevenVoicesRef = useRef<Record<string, string> | null>(null);
 
