@@ -660,14 +660,14 @@ export default function ChatStoryGenerator() {
             <Label>Message Delay (ms)</Label>
             <Input
               type="number"
-              min={0}
               step={50}
               value={messageDelay}
-              onChange={(e) => setMessageDelay(Math.max(0, Number(e.target.value) || 0))}
+              onChange={(e) => setMessageDelay(Number(e.target.value) || 0)}
               placeholder="0"
             />
             <p className="text-xs text-muted-foreground">
-              Pausa adicional após cada áudio terminar (0 = sem pausa).
+              Pausa entre mensagens (0 = sem pausa). Use valores negativos (ex.: -300) para
+              sobrepor o áudio à próxima mensagem.
             </p>
           </div>
 
