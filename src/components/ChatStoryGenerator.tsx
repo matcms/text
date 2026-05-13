@@ -13,6 +13,7 @@ import {
   Plus,
   X,
   User,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,6 +91,8 @@ export default function ChatStoryGenerator() {
   const [playingChatId, setPlayingChatId] = useState<string | null>(null);
 
   const [messagePauseSec, setMessagePauseSec] = useState(0.3);
+  const [messageDelay, setMessageDelay] = useState(0);
+  const [isGroupChat, setIsGroupChat] = useState(false);
 
   // Voice library (persisted)
   type SavedVoice = { name: string; voiceId: string };
@@ -360,6 +363,9 @@ export default function ChatStoryGenerator() {
           const audio = new Audio(msg.audioUrl);
           audio.play();
           await new Promise((r) => (audio.onended = () => r(null)));
+          if (Number(messageDelay) > 0) {
+            await new Promise((r) => setTimeout(r, Number(messageDelay)));
+          }
         }
         if (msg.type === "image") {
           await new Promise((r) => setTimeout(r, 2000));
@@ -424,6 +430,41 @@ export default function ChatStoryGenerator() {
                 WhatsApp (Dark)
               </Button>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Chat Mode</Label>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant={!isGroupChat ? "default" : "outline"}
+                onClick={() => setIsGroupChat(false)}
+              >
+                Direct Message
+              </Button>
+              <Button
+                size="sm"
+                variant={isGroupChat ? "default" : "outline"}
+                onClick={() => setIsGroupChat(true)}
+              >
+                Group Chat
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Message Delay (ms)</Label>
+            <Input
+              type="number"
+              min={0}
+              step={50}
+              value={messageDelay}
+              onChange={(e) => setMessageDelay(Math.max(0, Number(e.target.value) || 0))}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Pausa adicional após cada áudio terminar (0 = sem pausa).
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -843,7 +884,9 @@ export default function ChatStoryGenerator() {
                 <span className="text-[17px] font-semibold truncate leading-tight">
                   {displayChat.contactName}
                 </span>
-                <span className="text-[12px] text-[#8696a0] leading-tight">Online</span>
+                <span className="text-[12px] text-[#8696a0] leading-tight">
+                  {isGroupChat ? "tap here for group info" : "Online"}
+                </span>
               </div>
               <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
               <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
@@ -861,7 +904,11 @@ export default function ChatStoryGenerator() {
                 />
               </div>
               <div className="flex flex-col items-center mx-auto w-fit">
-                {displayChat.contactPhoto ? (
+                {isGroupChat ? (
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center">
+                    <Users className="h-7 w-7 text-white" />
+                  </div>
+                ) : displayChat.contactPhoto ? (
                   <img
                     src={displayChat.contactPhoto}
                     alt={displayChat.contactName}
@@ -905,6 +952,15 @@ export default function ChatStoryGenerator() {
                 const isLastSent =
                   m.side === "2" &&
                   !arr.slice(idx + 1).some((n) => n.side === "2");
+                const prev = arr[idx - 1];
+                const senderName = m.type === "text" ? m.voiceName : "";
+                const showName =
+                  isGroupChat &&
+                  m.side === "1" &&
+                  m.type === "text" &&
+                  (idx === 0 ||
+                    prev?.side === "2" ||
+                    (prev?.type === "text" && prev.voiceName !== m.voiceName));
                 return (
                 <motion.div
                   key={m.id}
@@ -914,6 +970,11 @@ export default function ChatStoryGenerator() {
                     m.side === "2" ? "items-end" : "items-start"
                   }`}
                 >
+                  {!isWA && showName && (
+                    <span className="text-[11px] text-[#8e8e93] mb-0.5 ml-3 capitalize block">
+                      {senderName}
+                    </span>
+                  )}
                   {m.type === "text" ? (
                     isWA ? (
                       <div
@@ -923,6 +984,11 @@ export default function ChatStoryGenerator() {
                             : "bg-[#262d31] rounded-lg rounded-tl-none wa-tail-left"
                         }`}
                       >
+                        {showName && (
+                          <span className="text-[13px] font-bold text-[#53bdeb] mb-0.5 capitalize block">
+                            {senderName}
+                          </span>
+                        )}
                         {m.text}
                       </div>
                     ) : (
