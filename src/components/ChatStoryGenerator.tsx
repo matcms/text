@@ -1795,7 +1795,7 @@ export default function ChatStoryGenerator() {
                 <Video className="h-5 w-5 text-white" />
               </div>
             </div>
-          )}
+          ))}
 
           {/* Chat */}
           <div
