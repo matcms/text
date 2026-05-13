@@ -335,23 +335,33 @@ export default function ChatStoryGenerator() {
   const parseScript = () => {
     const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
 
-    type Seg = { theme: ChatTheme; contactName: string; lines: string[] };
+    type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null };
     const segs: Seg[] = [];
     let cur: Seg | null = null;
 
     for (const line of lines) {
-      const headerMatch = line.match(/^-\s*(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i);
+      const headerMatch = line.match(
+        /^-\s*(?:(Direct|Group)\s+)?(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i,
+      );
       if (headerMatch) {
-        const kind = headerMatch[1].toLowerCase();
-        const name = headerMatch[2].trim();
+        const modeKw = headerMatch[1]?.toLowerCase();
+        const kind = headerMatch[2].toLowerCase();
+        const name = headerMatch[3].trim();
         const theme: ChatTheme =
           kind === "whatsapp" ? "whatsapp" : kind === "imessage" ? "imessage" : chatTheme;
-        cur = { theme, contactName: name, lines: [] };
+        const groupMode: boolean | null =
+          modeKw === "group" ? true : modeKw === "direct" ? false : null;
+        cur = { theme, contactName: name, lines: [], groupMode };
         segs.push(cur);
         continue;
       }
       if (!cur) {
-        cur = { theme: chatTheme, contactName: activeChat.contactName, lines: [] };
+        cur = {
+          theme: chatTheme,
+          contactName: activeChat.contactName,
+          lines: [],
+          groupMode: null,
+        };
         segs.push(cur);
       }
       cur.lines.push(line);
