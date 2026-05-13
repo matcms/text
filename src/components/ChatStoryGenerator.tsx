@@ -1012,7 +1012,7 @@ export default function ChatStoryGenerator() {
             onChange={(e) => updateActiveChat({ script: e.target.value })}
           />
           <p className="text-xs text-muted-foreground">
-            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template automaticamente) e linhas <code>1: NomeDaVoz&gt; texto</code>.
+            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template). Use <code>- Direct iMessage: nome</code> ou <code>- Group Whatsapp: nome</code> para definir o modo. Linhas: <code>1: NomeDaVoz&gt; texto</code>.
           </p>
         </div>
 
