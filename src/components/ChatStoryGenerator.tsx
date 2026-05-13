@@ -388,7 +388,7 @@ export default function ChatStoryGenerator() {
               placeholder="sk_..."
             />
             <p className="text-xs text-muted-foreground">
-              No script use o <strong>nome</strong> da voz da sua biblioteca (ex.: <code>Adam</code>).
+              No script use o <strong>voice_id</strong> da voz do ElevenLabs (ex.: <code>21m00Tcm4TlvDq8ikWAM</code>).
             </p>
           </div>
 
