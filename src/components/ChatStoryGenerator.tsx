@@ -1427,6 +1427,7 @@ export default function ChatStoryGenerator() {
             </div>
           )}
           </div>
+          </div>
           <Button
             onClick={recordVideo}
             disabled={!allAudiosReady || playing || recording}
