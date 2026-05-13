@@ -175,6 +175,23 @@ export default function ChatStoryGenerator() {
   } | null>(null);
   const [recording, setRecording] = useState(false);
 
+  // Projects (IndexedDB)
+  const [projectName, setProjectName] = useState("");
+  const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
+  const [projects, setProjects] = useState<StoredProject[]>([]);
+  const [savingProject, setSavingProject] = useState(false);
+
+  const refreshProjects = async () => {
+    try {
+      setProjects(await listProjects());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  useEffect(() => {
+    refreshProjects();
+  }, []);
+
   // Persist keys
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
