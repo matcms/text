@@ -68,6 +68,7 @@ type TextMsg = {
   side: string;
   type: "text";
   voiceName: string;
+  displayName?: string;
   text: string;
   spokenText?: string;
   audioUrl: string | null;
@@ -397,11 +398,16 @@ export default function ChatStoryGenerator() {
           const sepIdx = raw.indexOf("==");
           const displayText = sepIdx >= 0 ? raw.slice(0, sepIdx).trim() : raw;
           const spokenText = sepIdx >= 0 ? raw.slice(sepIdx + 2).trim() : undefined;
+          const speaker = textMatch[2].trim();
+          const dashIdx = speaker.indexOf("-");
+          const voiceName = dashIdx >= 0 ? speaker.slice(0, dashIdx).trim() : speaker;
+          const displayName = dashIdx >= 0 ? speaker.slice(dashIdx + 1).trim() : undefined;
           parsed.push({
             id: id++,
             side: textMatch[1],
             type: "text",
-            voiceName: textMatch[2].trim(),
+            voiceName,
+            displayName,
             text: displayText,
             spokenText,
             audioUrl: null,
@@ -1461,14 +1467,16 @@ export default function ChatStoryGenerator() {
                   m.side === "2" &&
                   !arr.slice(idx + 1).some((n) => n.side === "2");
                 const prev = arr[idx - 1];
-                const senderName = m.type === "text" ? m.voiceName : "";
+                const senderName = m.type === "text" ? (m.displayName || m.voiceName) : "";
+                const prevSenderName =
+                  prev?.type === "text" ? (prev.displayName || prev.voiceName) : "";
                 const showName =
                   effectiveGroupChat &&
                   m.side === "1" &&
                   m.type === "text" &&
                   (idx === 0 ||
                     prev?.side === "2" ||
-                    (prev?.type === "text" && prev.voiceName !== m.voiceName));
+                    (prev?.type === "text" && prevSenderName !== senderName));
                 return (
                 <motion.div
                   key={m.id}
