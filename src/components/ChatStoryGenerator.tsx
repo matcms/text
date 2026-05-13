@@ -706,6 +706,7 @@ export default function ChatStoryGenerator() {
       await playAnimation();
     } finally {
       isCapturing = false;
+      if (rafId !== null) cancelAnimationFrame(rafId);
       setTimeout(() => {
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: "video/webm" });
