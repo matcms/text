@@ -1474,9 +1474,7 @@ export default function ChatStoryGenerator() {
                   effectiveGroupChat &&
                   m.side === "1" &&
                   m.type === "text" &&
-                  (idx === 0 ||
-                    prev?.side === "2" ||
-                    (prev?.type === "text" && prevSenderName !== senderName));
+                  !!m.displayName;
                 return (
                 <motion.div
                   key={m.id}
