@@ -1542,18 +1542,10 @@ export default function ChatStoryGenerator() {
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className={`aspect-[9/16] w-full max-w-[400px] h-full overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl ${compactMode ? "" : "bg-black"}`}
-          style={compactMode ? bgStyle : undefined}
+          className="aspect-[9/16] w-full max-w-[400px] h-full bg-black overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl"
         >
-          <div
-            className={
-              compactMode
-                ? "absolute left-[5%] right-[5%] top-[8%] h-[46%] flex flex-col rounded-2xl overflow-hidden shadow-xl bg-black"
-                : "flex flex-col flex-1 w-full h-full"
-            }
-          >
           {/* Header */}
-          {!compactMode && (isWA ? (
+          {isWA ? (
             <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
               <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
               {displayChat.contactPhoto ? (
