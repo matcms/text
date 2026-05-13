@@ -193,6 +193,8 @@ export default function ChatStoryGenerator() {
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatOuterRef = useRef<HTMLDivElement>(null);
+  const chatInnerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const recordingCtxRef = useRef<{
     audioCtx: AudioContext;
@@ -200,6 +202,7 @@ export default function ChatStoryGenerator() {
   } | null>(null);
   const [recording, setRecording] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportScroll, setExportScroll] = useState(0);
   const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
 
   // Projects (IndexedDB)
