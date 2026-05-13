@@ -67,6 +67,7 @@ type TextMsg = {
   type: "text";
   voiceName: string;
   text: string;
+  spokenText?: string;
   audioUrl: string | null;
 };
 type ImgMsg = {
