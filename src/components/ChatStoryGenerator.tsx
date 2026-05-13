@@ -1024,7 +1024,7 @@ export default function ChatStoryGenerator() {
           ) : (
             <>
               <Upload className="mr-2 h-4 w-4 rotate-180" />
-              Baixar vídeo (.webm)
+              Baixar vídeo (.mp4)
             </>
           )}
         </Button>
