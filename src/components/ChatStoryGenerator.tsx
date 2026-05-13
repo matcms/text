@@ -175,6 +175,8 @@ export default function ChatStoryGenerator() {
     dest: MediaStreamAudioDestinationNode;
   } | null>(null);
   const [recording, setRecording] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
 
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
