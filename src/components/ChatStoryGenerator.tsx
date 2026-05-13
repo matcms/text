@@ -661,11 +661,14 @@ export default function ChatStoryGenerator() {
 
   const playAnimation = async () => {
     setPlaying(true);
-    const delayMs = Number(messageDelay) || 0;
+    setExportScroll(0);
 
-    const scrollDown = () => {
-      const el = chatScrollRef.current;
-      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const applyVirtualScroll = () => {
+      if (chatOuterRef.current && chatInnerRef.current) {
+        const outerHeight = chatOuterRef.current.clientHeight;
+        const innerHeight = chatInnerRef.current.scrollHeight;
+        setExportScroll(innerHeight > outerHeight ? innerHeight - outerHeight : 0);
+      }
     };
 
     for (let c = 0; c < chats.length; c++) {
@@ -673,21 +676,18 @@ export default function ChatStoryGenerator() {
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
       setVisibleMessages([]);
+      setExportScroll(0);
+      await new Promise((r) => setTimeout(r, 100));
 
-      const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
         const msg = chat.messages[i];
 
-        queue.push(msg);
-        setVisibleMessages([...queue]);
-        await new Promise((r) => requestAnimationFrame(() => r(null)));
-        scrollDown();
-        if (msg.type === "text" && msg.audioUrl) {
-          // Yield to React so DOM updates and auto-scroll happens BEFORE audio
-          await new Promise((r) => setTimeout(r, 100));
-          scrollDown();
-          await new Promise((r) => setTimeout(r, 100));
+        setVisibleMessages((prev) => [...prev, msg]);
+        await new Promise((r) => setTimeout(r, 100));
+        applyVirtualScroll();
+        await new Promise((r) => setTimeout(r, 200));
 
+        if (msg.type === "text" && msg.audioUrl) {
           const rec = recordingCtxRef.current;
           const audio = new Audio(msg.audioUrl);
           if (rec) {
@@ -723,6 +723,7 @@ export default function ChatStoryGenerator() {
 
           audio.play().catch((err) => console.error("audio play failed", err));
 
+          const delayMs = Number(messageDelay) || 0;
           let durationMs = (audio.duration || 0) * 1000;
           if (!isFinite(durationMs) || durationMs <= 0) durationMs = 2000;
           const waitTime = Math.max(0, durationMs + delayMs);
@@ -740,6 +741,7 @@ export default function ChatStoryGenerator() {
     }
     setPlayingChatId(null);
     setPlaying(false);
+    setExportScroll(0);
   };
 
   const recordVideo = async () => {
