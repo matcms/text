@@ -241,6 +241,72 @@ export default function ChatStoryGenerator() {
     refreshProjects();
   }, []);
 
+  // Backgrounds
+  const [backgrounds, setBackgrounds] = useState<StoredBackground[]>(DEFAULT_BACKGROUNDS);
+  const [activeBackground, setActiveBackground] = useState<string>("#9333ea");
+  const [newColor, setNewColor] = useState<string>("#ff0066");
+  const bgFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await listBackgrounds();
+        setBackgrounds([...DEFAULT_BACKGROUNDS, ...stored]);
+      } catch (e) {
+        console.error("listBackgrounds failed", e);
+      }
+    })();
+  }, []);
+
+  const addColorBackground = async () => {
+    const bg: StoredBackground = {
+      id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: "color",
+      value: newColor,
+      createdAt: Date.now(),
+    };
+    try {
+      await saveBackground(bg);
+    } catch (e) {
+      console.error(e);
+    }
+    setBackgrounds((p) => [...p, bg]);
+    setActiveBackground(bg.value);
+  };
+
+  const addImageBackground = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl) return;
+      const bg: StoredBackground = {
+        id: `i_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: "image",
+        value: dataUrl,
+        createdAt: Date.now(),
+      };
+      try {
+        await saveBackground(bg);
+      } catch (e) {
+        console.error(e);
+      }
+      setBackgrounds((p) => [...p, bg]);
+      setActiveBackground(bg.value);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeBackground = async (bg: StoredBackground) => {
+    if (bg.id.startsWith("default-")) return;
+    try {
+      await deleteBackground(bg.id);
+    } catch (e) {
+      console.error(e);
+    }
+    setBackgrounds((p) => p.filter((x) => x.id !== bg.id));
+    if (activeBackground === bg.value) setActiveBackground("#9333ea");
+  };
+
   const handleSaveProject = async () => {
     const name = projectName.trim();
     if (!name) {
