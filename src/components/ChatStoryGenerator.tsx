@@ -902,7 +902,7 @@ export default function ChatStoryGenerator() {
           const outer = chatOuterRef.current.clientHeight;
           const inner = chatInnerRef.current.scrollHeight;
           if (inner > outer) {
-            chatInnerRef.current.style.transform = `translateY(-${inner - outer + 40}px)`;
+            chatInnerRef.current.style.transform = `translateY(-${inner - outer}px)`;
           } else {
             chatInnerRef.current.style.transform = "translateY(0px)";
           }
@@ -927,8 +927,7 @@ export default function ChatStoryGenerator() {
         }
 
         if (tempCanvas) {
-          ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
-          ctx1080.fillRect(0, 0, 1080, 1920);
+          ctx1080.clearRect(0, 0, 1080, 1920);
           ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
           tempCanvas.width = 0;
           tempCanvas.height = 0;
@@ -1664,9 +1663,14 @@ export default function ChatStoryGenerator() {
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className="aspect-[9/16] w-full max-w-[400px] h-full bg-black overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl"
+          className="w-full h-full flex items-center justify-center relative overflow-hidden bg-[#9333ea]"
+        >
+        <div
+          className="w-[92%] h-fit max-h-[85%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
+          style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
         >
           {/* Header */}
+          <div className="shrink-0 z-10 w-full">
           {isWA ? (
             <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
               <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
@@ -1740,6 +1744,7 @@ export default function ChatStoryGenerator() {
               </div>
             </div>
           )}
+          </div>
 
           {/* Chat */}
           <div
@@ -1747,9 +1752,8 @@ export default function ChatStoryGenerator() {
               chatOuterRef.current = el;
               chatScrollRef.current = el;
             }}
-            className="flex-1 w-full overflow-hidden relative"
+            className="w-full relative overflow-hidden flex-shrink min-h-0"
             style={{
-              backgroundColor: isWA ? "#0b141a" : "#000000",
               ...(isWA
                 ? {
                     backgroundImage:
@@ -1761,7 +1765,7 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className="absolute top-0 left-0 w-full flex flex-col justify-start pb-24 min-h-full"
+              className="w-full flex flex-col justify-start p-3 gap-1"
               style={{
                 transform: `translateY(-${exportScroll}px)`,
               }}
@@ -1864,6 +1868,7 @@ export default function ChatStoryGenerator() {
               );})}
             </AnimatePresence>
           </div>
+        </div>
         </div>
         </div>
           {recording && (
