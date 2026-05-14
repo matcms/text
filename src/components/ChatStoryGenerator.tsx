@@ -65,6 +65,19 @@ import {
   type StoredChat,
   type StoredMsg,
 } from "@/lib/projects-db";
+import {
+  saveBackground,
+  listBackgrounds,
+  deleteBackground,
+  type StoredBackground,
+} from "@/lib/backgrounds-db";
+
+const DEFAULT_BACKGROUNDS: StoredBackground[] = [
+  { id: "default-purple", type: "color", value: "#9333ea", createdAt: 0 },
+  { id: "default-green", type: "color", value: "#16a34a", createdAt: 1 },
+  { id: "default-orange", type: "color", value: "#ea580c", createdAt: 2 },
+  { id: "default-black", type: "color", value: "#000000", createdAt: 3 },
+];
 
 type TextMsg = {
   id: number;
