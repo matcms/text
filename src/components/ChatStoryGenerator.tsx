@@ -980,7 +980,19 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err) {
       console.error("Export Failed:", err);
-      alert(`Falha na Exportação: ${err instanceof Error ? err.message : String(err)}`);
+      let errorMsg = "Erro Desconhecido";
+      if (err instanceof Error) {
+        errorMsg = err.message;
+      } else if (err instanceof Event) {
+        errorMsg = `Bloqueio de Segurança/CORS do navegador (Tipo: ${err.type}). Tente usar o Google Chrome no PC.`;
+      } else {
+        try {
+          errorMsg = JSON.stringify(err);
+        } catch {
+          errorMsg = String(err);
+        }
+      }
+      alert(`Falha na Exportação: ${errorMsg}`);
     } finally {
       setRecording(false);
       setExportProgress(0);
