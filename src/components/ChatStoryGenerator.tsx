@@ -914,7 +914,7 @@ export default function ChatStoryGenerator() {
           cacheBust: true,
           skipFonts: false,
           useCORS: true,
-        });
+        } as any);
         ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
         ctx1080.fillRect(0, 0, 1080, 1920);
         ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
@@ -1855,7 +1855,7 @@ export default function ChatStoryGenerator() {
           )}
           </div>
           <Button
-            onClick={recordVideo}
+            onClick={exportVideoFast}
             disabled={!allAudiosReady || playing || recording}
             size="lg"
             style={{ width: 400 }}
