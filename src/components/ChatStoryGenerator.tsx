@@ -927,8 +927,8 @@ export default function ChatStoryGenerator() {
         }
 
         if (tempCanvas) {
-          ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
-          ctx1080.fillRect(0, 0, 1080, 1920);
+        if (tempCanvas) {
+          ctx1080.clearRect(0, 0, 1080, 1920);
           ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
           tempCanvas.width = 0;
           tempCanvas.height = 0;
