@@ -1745,6 +1745,7 @@ export default function ChatStoryGenerator() {
               </div>
             </div>
           )}
+          </div>
 
           {/* Chat */}
           <div
@@ -1752,9 +1753,8 @@ export default function ChatStoryGenerator() {
               chatOuterRef.current = el;
               chatScrollRef.current = el;
             }}
-            className="flex-1 w-full overflow-hidden relative"
+            className="w-full relative overflow-hidden flex-shrink min-h-0"
             style={{
-              backgroundColor: isWA ? "#0b141a" : "#000000",
               ...(isWA
                 ? {
                     backgroundImage:
@@ -1766,7 +1766,7 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className="absolute top-0 left-0 w-full flex flex-col justify-start pb-24 min-h-full"
+              className="w-full flex flex-col justify-start p-3 gap-1"
               style={{
                 transform: `translateY(-${exportScroll}px)`,
               }}
