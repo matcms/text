@@ -1664,9 +1664,14 @@ export default function ChatStoryGenerator() {
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className="aspect-[9/16] w-full max-w-[400px] h-full bg-black overflow-hidden flex flex-col relative rounded-[2rem] shadow-2xl"
+          className="w-full h-full flex items-center justify-center relative overflow-hidden bg-[#9333ea]"
+        >
+        <div
+          className="w-[92%] h-fit max-h-[85%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
+          style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
         >
           {/* Header */}
+          <div className="shrink-0 z-10 w-full">
           {isWA ? (
             <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
               <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
