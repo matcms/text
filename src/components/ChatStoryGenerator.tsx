@@ -1254,7 +1254,7 @@ export default function ChatStoryGenerator() {
           <div className="flex flex-wrap gap-2">
             {backgrounds.map((bg) => {
               const isActive = activeBackground === bg.value;
-              const style: React.CSSProperties =
+              const style: CSSProperties =
                 bg.type === "color"
                   ? { backgroundColor: bg.value }
                   : {
