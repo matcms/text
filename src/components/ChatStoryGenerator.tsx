@@ -927,7 +927,6 @@ export default function ChatStoryGenerator() {
         }
 
         if (tempCanvas) {
-        if (tempCanvas) {
           ctx1080.clearRect(0, 0, 1080, 1920);
           ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
           tempCanvas.width = 0;
