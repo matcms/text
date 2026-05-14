@@ -913,6 +913,7 @@ export default function ChatStoryGenerator() {
           pixelRatio: 2,
           cacheBust: true,
           skipFonts: false,
+          useCORS: true,
         });
         ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
         ctx1080.fillRect(0, 0, 1080, 1920);
@@ -920,12 +921,12 @@ export default function ChatStoryGenerator() {
         tempCanvas.width = 0;
         tempCanvas.height = 0;
 
-        const durationSec = timings[i] || 0;
+        const durationSec = tracksInfo[i]?.duration || 0;
         const framesToEncode = Math.max(1, Math.round(durationSec * fps));
         const bitmap = await createImageBitmap(canvas1080);
 
         for (let f = 0; f < framesToEncode; f++) {
-          const frame = new (window as any).VideoFrame(bitmap, { timestamp: timestampUs });
+          const frame = new (window as any).VideoFrame(bitmap, { timestamp: Math.round(timestampUs) });
           videoEncoder.encode(frame, { keyFrame: framesEncoded % 60 === 0 });
           frame.close();
           timestampUs += 1_000_000 / fps;
@@ -937,7 +938,7 @@ export default function ChatStoryGenerator() {
       // End padding
       const endBitmap = await createImageBitmap(canvas1080);
       for (let f = 0; f < 30; f++) {
-        const frame = new (window as any).VideoFrame(endBitmap, { timestamp: timestampUs });
+        const frame = new (window as any).VideoFrame(endBitmap, { timestamp: Math.round(timestampUs) });
         videoEncoder.encode(frame);
         frame.close();
         timestampUs += 1_000_000 / fps;
@@ -966,7 +967,7 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err) {
       console.error("Export Failed:", err);
-      alert("Falha na exportação. Veja o console.");
+      alert(`Falha na Exportação: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRecording(false);
       setExportProgress(0);
