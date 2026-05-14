@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toCanvas } from "html-to-image";
 import { Muxer, ArrayBufferTarget } from "webm-muxer";
@@ -65,6 +65,19 @@ import {
   type StoredChat,
   type StoredMsg,
 } from "@/lib/projects-db";
+import {
+  saveBackground,
+  listBackgrounds,
+  deleteBackground,
+  type StoredBackground,
+} from "@/lib/backgrounds-db";
+
+const DEFAULT_BACKGROUNDS: StoredBackground[] = [
+  { id: "default-purple", type: "color", value: "#9333ea", createdAt: 0 },
+  { id: "default-green", type: "color", value: "#16a34a", createdAt: 1 },
+  { id: "default-orange", type: "color", value: "#ea580c", createdAt: 2 },
+  { id: "default-black", type: "color", value: "#000000", createdAt: 3 },
+];
 
 type TextMsg = {
   id: number;
@@ -227,6 +240,72 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     refreshProjects();
   }, []);
+
+  // Backgrounds
+  const [backgrounds, setBackgrounds] = useState<StoredBackground[]>(DEFAULT_BACKGROUNDS);
+  const [activeBackground, setActiveBackground] = useState<string>("#9333ea");
+  const [newColor, setNewColor] = useState<string>("#ff0066");
+  const bgFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await listBackgrounds();
+        setBackgrounds([...DEFAULT_BACKGROUNDS, ...stored]);
+      } catch (e) {
+        console.error("listBackgrounds failed", e);
+      }
+    })();
+  }, []);
+
+  const addColorBackground = async () => {
+    const bg: StoredBackground = {
+      id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: "color",
+      value: newColor,
+      createdAt: Date.now(),
+    };
+    try {
+      await saveBackground(bg);
+    } catch (e) {
+      console.error(e);
+    }
+    setBackgrounds((p) => [...p, bg]);
+    setActiveBackground(bg.value);
+  };
+
+  const addImageBackground = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl) return;
+      const bg: StoredBackground = {
+        id: `i_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: "image",
+        value: dataUrl,
+        createdAt: Date.now(),
+      };
+      try {
+        await saveBackground(bg);
+      } catch (e) {
+        console.error(e);
+      }
+      setBackgrounds((p) => [...p, bg]);
+      setActiveBackground(bg.value);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeBackground = async (bg: StoredBackground) => {
+    if (bg.id.startsWith("default-")) return;
+    try {
+      await deleteBackground(bg.id);
+    } catch (e) {
+      console.error(e);
+    }
+    setBackgrounds((p) => p.filter((x) => x.id !== bg.id));
+    if (activeBackground === bg.value) setActiveBackground("#9333ea");
+  };
 
   const handleSaveProject = async () => {
     const name = projectName.trim();
@@ -1169,6 +1248,85 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
+        {/* Video Background Manager */}
+        <div className="space-y-3 rounded-lg border p-4">
+          <Label>Video Background</Label>
+          <div className="flex flex-wrap gap-2">
+            {backgrounds.map((bg) => {
+              const isActive = activeBackground === bg.value;
+              const style: CSSProperties =
+                bg.type === "color"
+                  ? { backgroundColor: bg.value }
+                  : {
+                      backgroundImage: `url(${bg.value})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                    };
+              return (
+                <div key={bg.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setActiveBackground(bg.value)}
+                    className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all ${
+                      isActive
+                        ? "border-primary ring-2 ring-primary scale-110"
+                        : "border-border hover:border-foreground/40"
+                    }`}
+                    style={style}
+                    title={bg.type === "color" ? bg.value : "Custom image"}
+                  />
+                  {!bg.id.startsWith("default-") && (
+                    <button
+                      type="button"
+                      onClick={() => removeBackground(bg)}
+                      className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] leading-none"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={newColor}
+              onChange={(e) => setNewColor(e.target.value)}
+              className="w-10 h-9 rounded cursor-pointer border border-input bg-transparent"
+            />
+            <Button size="sm" variant="outline" onClick={addColorBackground}>
+              Add Color
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={bgFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) addImageBackground(f);
+                if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+              }}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bgFileInputRef.current?.click()}
+            >
+              <Upload className="w-4 h-4 mr-1" /> Upload Image
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Imagens são salvas localmente em Base64 (compatível com a exportação offline).
+          </p>
+        </div>
+
         {/* Chat tabs */}
         <div className="flex flex-wrap gap-2 items-center">
           {chats.map((c) => (
@@ -1663,10 +1821,15 @@ export default function ChatStoryGenerator() {
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className="w-full h-full flex items-center justify-center relative overflow-hidden bg-[#9333ea]"
+          className="w-full h-full flex items-center justify-center relative overflow-hidden"
+          style={{
+            background: activeBackground.startsWith("data:image")
+              ? `url(${activeBackground}) center/cover no-repeat`
+              : activeBackground,
+          }}
         >
         <div
-          className="w-[92%] h-fit max-h-[85%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
+          className="w-[92%] h-fit max-h-[65%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
           style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
         >
           {/* Header */}
