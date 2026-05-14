@@ -834,7 +834,7 @@ export default function ChatStoryGenerator() {
       // 2) Setup muxer + encoders
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: "V_VP9", width: 1080, height: 1920 },
+        video: { codec: "V_VP8", width: 1080, height: 1920 },
         audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
       });
 
@@ -843,7 +843,7 @@ export default function ChatStoryGenerator() {
         error: (e: any) => console.error("Video error:", e),
       });
       videoEncoder.configure({
-        codec: "vp09.00.10.08",
+        codec: "vp8",
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
@@ -870,7 +870,7 @@ export default function ChatStoryGenerator() {
           sampleRate: 48000,
           numberOfFrames: chunk.length,
           numberOfChannels: 1,
-          timestamp: (i / 48000) * 1_000_000,
+          timestamp: Math.round((i / 48000) * 1_000_000),
           data: chunk,
         });
         audioEncoder.encode(audioData);
