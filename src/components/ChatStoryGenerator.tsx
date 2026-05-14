@@ -765,7 +765,7 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  const recordVideo = async () => {
+  const exportVideoFast = async () => {
     if (!previewRef.current) return;
     if (!allAudiosReady) {
       alert("Gere os áudios primeiro.");
@@ -775,8 +775,8 @@ export default function ChatStoryGenerator() {
     const messages = displayChat.messages;
     if (messages.length === 0) return;
 
-    if (typeof (window as any).VideoEncoder === "undefined") {
-      alert("Seu navegador não suporta WebCodecs. Use Chrome/Edge atualizado.");
+    if (typeof (window as any).VideoEncoder === "undefined" || typeof (window as any).AudioEncoder === "undefined") {
+      alert("Seu navegador não suporta a exportação avançada. Use o Google Chrome no PC.");
       return;
     }
 
@@ -784,47 +784,49 @@ export default function ChatStoryGenerator() {
     setExportProgress(1);
 
     try {
-      // 1) Decode and mix audio offline
+      // 1) Decode and mix audio offline safely
       const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AC();
-      const buffers: (AudioBuffer | null)[] = [];
-      const timings: number[] = [];
+      const tracksInfo: { buffer: AudioBuffer | null; duration: number }[] = [];
       const delaySec = (Number(messageDelay) || 0) / 1000;
       let totalDurationSec = 0;
 
-      for (const msg of messages) {
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
         const url = msg.type === "text" ? (msg as any).audioUrl : null;
         if (!url) {
-          buffers.push(null);
-          const step = Math.max(0.5, delaySec || 0.5);
-          timings.push(step);
-          totalDurationSec += step;
+          tracksInfo.push({ buffer: null, duration: 2.5 });
+          totalDurationSec += 2.5;
           continue;
         }
-        const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        buffers.push(audioBuffer);
-        const step = Math.max(0.1, audioBuffer.duration + delaySec);
-        timings.push(step);
-        totalDurationSec += step;
+        try {
+          const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          const step = Math.max(0.1, audioBuffer.duration + delaySec);
+          tracksInfo.push({ buffer: audioBuffer, duration: step });
+          totalDurationSec += step;
+        } catch (decodeErr) {
+          console.warn(`Error decoding audio for message ${i}`, decodeErr);
+          tracksInfo.push({ buffer: null, duration: 2.0 });
+          totalDurationSec += 2.0;
+        }
       }
-      totalDurationSec += 1;
+      totalDurationSec = Math.max(1, totalDurationSec + 1);
 
       const offlineCtx = new OfflineAudioContext(
         1,
         Math.ceil(48000 * totalDurationSec),
         48000,
       );
-      let acc = 0;
-      for (let i = 0; i < buffers.length; i++) {
-        const b = buffers[i];
-        if (b) {
+      let currentTime = 0;
+      for (const track of tracksInfo) {
+        if (track.buffer) {
           const src = offlineCtx.createBufferSource();
-          src.buffer = b;
+          src.buffer = track.buffer;
           src.connect(offlineCtx.destination);
-          src.start(acc);
+          src.start(currentTime);
         }
-        acc += timings[i];
+        currentTime += track.duration;
       }
       const renderedAudio = await offlineCtx.startRendering();
       try { audioCtx.close(); } catch {}
