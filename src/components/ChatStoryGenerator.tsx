@@ -765,7 +765,7 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  const recordVideo = async () => {
+  const exportVideoFast = async () => {
     if (!previewRef.current) return;
     if (!allAudiosReady) {
       alert("Gere os áudios primeiro.");
@@ -775,8 +775,8 @@ export default function ChatStoryGenerator() {
     const messages = displayChat.messages;
     if (messages.length === 0) return;
 
-    if (typeof (window as any).VideoEncoder === "undefined") {
-      alert("Seu navegador não suporta WebCodecs. Use Chrome/Edge atualizado.");
+    if (typeof (window as any).VideoEncoder === "undefined" || typeof (window as any).AudioEncoder === "undefined") {
+      alert("Seu navegador não suporta a exportação avançada. Use o Google Chrome no PC.");
       return;
     }
 
@@ -784,47 +784,49 @@ export default function ChatStoryGenerator() {
     setExportProgress(1);
 
     try {
-      // 1) Decode and mix audio offline
+      // 1) Decode and mix audio offline safely
       const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AC();
-      const buffers: (AudioBuffer | null)[] = [];
-      const timings: number[] = [];
+      const tracksInfo: { buffer: AudioBuffer | null; duration: number }[] = [];
       const delaySec = (Number(messageDelay) || 0) / 1000;
       let totalDurationSec = 0;
 
-      for (const msg of messages) {
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
         const url = msg.type === "text" ? (msg as any).audioUrl : null;
         if (!url) {
-          buffers.push(null);
-          const step = Math.max(0.5, delaySec || 0.5);
-          timings.push(step);
-          totalDurationSec += step;
+          tracksInfo.push({ buffer: null, duration: 2.5 });
+          totalDurationSec += 2.5;
           continue;
         }
-        const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        buffers.push(audioBuffer);
-        const step = Math.max(0.1, audioBuffer.duration + delaySec);
-        timings.push(step);
-        totalDurationSec += step;
+        try {
+          const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          const step = Math.max(0.1, audioBuffer.duration + delaySec);
+          tracksInfo.push({ buffer: audioBuffer, duration: step });
+          totalDurationSec += step;
+        } catch (decodeErr) {
+          console.warn(`Error decoding audio for message ${i}`, decodeErr);
+          tracksInfo.push({ buffer: null, duration: 2.0 });
+          totalDurationSec += 2.0;
+        }
       }
-      totalDurationSec += 1;
+      totalDurationSec = Math.max(1, totalDurationSec + 1);
 
       const offlineCtx = new OfflineAudioContext(
         1,
         Math.ceil(48000 * totalDurationSec),
         48000,
       );
-      let acc = 0;
-      for (let i = 0; i < buffers.length; i++) {
-        const b = buffers[i];
-        if (b) {
+      let currentTime = 0;
+      for (const track of tracksInfo) {
+        if (track.buffer) {
           const src = offlineCtx.createBufferSource();
-          src.buffer = b;
+          src.buffer = track.buffer;
           src.connect(offlineCtx.destination);
-          src.start(acc);
+          src.start(currentTime);
         }
-        acc += timings[i];
+        currentTime += track.duration;
       }
       const renderedAudio = await offlineCtx.startRendering();
       try { audioCtx.close(); } catch {}
@@ -832,7 +834,7 @@ export default function ChatStoryGenerator() {
       // 2) Setup muxer + encoders
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: "V_VP9", width: 1080, height: 1920 },
+        video: { codec: "V_VP8", width: 1080, height: 1920 },
         audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
       });
 
@@ -841,7 +843,7 @@ export default function ChatStoryGenerator() {
         error: (e: any) => console.error("Video error:", e),
       });
       videoEncoder.configure({
-        codec: "vp09.00.10.08",
+        codec: "vp8",
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
@@ -868,7 +870,7 @@ export default function ChatStoryGenerator() {
           sampleRate: 48000,
           numberOfFrames: chunk.length,
           numberOfChannels: 1,
-          timestamp: (i / 48000) * 1_000_000,
+          timestamp: Math.round((i / 48000) * 1_000_000),
           data: chunk,
         });
         audioEncoder.encode(audioData);
@@ -911,19 +913,20 @@ export default function ChatStoryGenerator() {
           pixelRatio: 2,
           cacheBust: true,
           skipFonts: false,
-        });
+          useCORS: true,
+        } as any);
         ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
         ctx1080.fillRect(0, 0, 1080, 1920);
         ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
         tempCanvas.width = 0;
         tempCanvas.height = 0;
 
-        const durationSec = timings[i] || 0;
+        const durationSec = tracksInfo[i]?.duration || 0;
         const framesToEncode = Math.max(1, Math.round(durationSec * fps));
         const bitmap = await createImageBitmap(canvas1080);
 
         for (let f = 0; f < framesToEncode; f++) {
-          const frame = new (window as any).VideoFrame(bitmap, { timestamp: timestampUs });
+          const frame = new (window as any).VideoFrame(bitmap, { timestamp: Math.round(timestampUs) });
           videoEncoder.encode(frame, { keyFrame: framesEncoded % 60 === 0 });
           frame.close();
           timestampUs += 1_000_000 / fps;
@@ -935,7 +938,7 @@ export default function ChatStoryGenerator() {
       // End padding
       const endBitmap = await createImageBitmap(canvas1080);
       for (let f = 0; f < 30; f++) {
-        const frame = new (window as any).VideoFrame(endBitmap, { timestamp: timestampUs });
+        const frame = new (window as any).VideoFrame(endBitmap, { timestamp: Math.round(timestampUs) });
         videoEncoder.encode(frame);
         frame.close();
         timestampUs += 1_000_000 / fps;
@@ -964,7 +967,7 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err) {
       console.error("Export Failed:", err);
-      alert("Falha na exportação. Veja o console.");
+      alert(`Falha na Exportação: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRecording(false);
       setExportProgress(0);
@@ -1852,7 +1855,7 @@ export default function ChatStoryGenerator() {
           )}
           </div>
           <Button
-            onClick={recordVideo}
+            onClick={exportVideoFast}
             disabled={!allAudiosReady || playing || recording}
             size="lg"
             style={{ width: 400 }}
