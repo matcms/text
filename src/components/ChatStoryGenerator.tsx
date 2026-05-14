@@ -902,7 +902,7 @@ export default function ChatStoryGenerator() {
           const outer = chatOuterRef.current.clientHeight;
           const inner = chatInnerRef.current.scrollHeight;
           if (inner > outer) {
-            chatInnerRef.current.style.transform = `translateY(-${inner - outer + 40}px)`;
+            chatInnerRef.current.style.transform = `translateY(-${inner - outer}px)`;
           } else {
             chatInnerRef.current.style.transform = "translateY(0px)";
           }
