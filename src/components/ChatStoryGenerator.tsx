@@ -1742,10 +1742,15 @@ export default function ChatStoryGenerator() {
         <div className="relative aspect-[9/16] w-full max-w-[400px]">
         <div
           ref={previewRef}
-          className="w-full h-full flex items-center justify-center relative overflow-hidden bg-[#9333ea]"
+          className="w-full h-full flex items-center justify-center relative overflow-hidden"
+          style={{
+            background: activeBackground.startsWith("data:image")
+              ? `url(${activeBackground}) center/cover no-repeat`
+              : activeBackground,
+          }}
         >
         <div
-          className="w-[92%] h-fit max-h-[85%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
+          className="w-[92%] h-fit max-h-[65%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
           style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
         >
           {/* Header */}
