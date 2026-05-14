@@ -1248,6 +1248,85 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
 
+        {/* Video Background Manager */}
+        <div className="space-y-3 rounded-lg border p-4">
+          <Label>Video Background</Label>
+          <div className="flex flex-wrap gap-2">
+            {backgrounds.map((bg) => {
+              const isActive = activeBackground === bg.value;
+              const style: React.CSSProperties =
+                bg.type === "color"
+                  ? { backgroundColor: bg.value }
+                  : {
+                      backgroundImage: `url(${bg.value})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                    };
+              return (
+                <div key={bg.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setActiveBackground(bg.value)}
+                    className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all ${
+                      isActive
+                        ? "border-primary ring-2 ring-primary scale-110"
+                        : "border-border hover:border-foreground/40"
+                    }`}
+                    style={style}
+                    title={bg.type === "color" ? bg.value : "Custom image"}
+                  />
+                  {!bg.id.startsWith("default-") && (
+                    <button
+                      type="button"
+                      onClick={() => removeBackground(bg)}
+                      className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] leading-none"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={newColor}
+              onChange={(e) => setNewColor(e.target.value)}
+              className="w-10 h-9 rounded cursor-pointer border border-input bg-transparent"
+            />
+            <Button size="sm" variant="outline" onClick={addColorBackground}>
+              Add Color
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={bgFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) addImageBackground(f);
+                if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+              }}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bgFileInputRef.current?.click()}
+            >
+              <Upload className="w-4 h-4 mr-1" /> Upload Image
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Imagens são salvas localmente em Base64 (compatível com a exportação offline).
+          </p>
+        </div>
+
         {/* Chat tabs */}
         <div className="flex flex-wrap gap-2 items-center">
           {chats.map((c) => (
