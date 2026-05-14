@@ -909,17 +909,30 @@ export default function ChatStoryGenerator() {
         }
         await new Promise((r) => setTimeout(r, 50));
 
-        const tempCanvas = await toCanvas(previewRef.current!, {
-          pixelRatio: 2,
-          cacheBust: true,
-          skipFonts: false,
-          useCORS: true,
-        } as any);
-        ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
-        ctx1080.fillRect(0, 0, 1080, 1920);
-        ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
-        tempCanvas.width = 0;
-        tempCanvas.height = 0;
+        // Take ONE static high-res screenshot WITH SAFE FALLBACK
+        let tempCanvas: HTMLCanvasElement | null = null;
+        try {
+          tempCanvas = await toCanvas(previewRef.current!, {
+            pixelRatio: 2,
+            cacheBust: false, // CRITICAL: true can break blob URIs
+            skipFonts: true, // CRITICAL: prevents font loading Event timeouts
+            useCORS: true,
+            filter: (node: any) => {
+              return node?.tagName?.toLowerCase() !== "iframe";
+            },
+          } as any);
+        } catch (imgErr) {
+          console.warn("Canvas capture failed for frame", i, ". Reusing previous frame.", imgErr);
+          // tempCanvas remains null. Reuse the previous frame already on ctx1080.
+        }
+
+        if (tempCanvas) {
+          ctx1080.fillStyle = isWA ? "#0b141a" : "#000000";
+          ctx1080.fillRect(0, 0, 1080, 1920);
+          ctx1080.drawImage(tempCanvas, 0, 0, 1080, 1920);
+          tempCanvas.width = 0;
+          tempCanvas.height = 0;
+        }
 
         const durationSec = tracksInfo[i]?.duration || 0;
         const framesToEncode = Math.max(1, Math.round(durationSec * fps));
@@ -967,7 +980,19 @@ export default function ChatStoryGenerator() {
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err) {
       console.error("Export Failed:", err);
-      alert(`Falha na Exportação: ${err instanceof Error ? err.message : String(err)}`);
+      let errorMsg = "Erro Desconhecido";
+      if (err instanceof Error) {
+        errorMsg = err.message;
+      } else if (err instanceof Event) {
+        errorMsg = `Bloqueio de Segurança/CORS do navegador (Tipo: ${err.type}). Tente usar o Google Chrome no PC.`;
+      } else {
+        try {
+          errorMsg = JSON.stringify(err);
+        } catch {
+          errorMsg = String(err);
+        }
+      }
+      alert(`Falha na Exportação: ${errorMsg}`);
     } finally {
       setRecording(false);
       setExportProgress(0);
