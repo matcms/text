@@ -222,6 +222,8 @@ export default function ChatStoryGenerator() {
   const [recording, setRecording] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportScroll, setExportScroll] = useState(0);
+  const [previewDragOffset, setPreviewDragOffset] = useState(0);
+  const dragStateRef = useRef<{ startY: number; startOffset: number } | null>(null);
   const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
 
   // Projects (IndexedDB)
