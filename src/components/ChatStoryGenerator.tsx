@@ -2035,6 +2035,34 @@ export default function ChatStoryGenerator() {
           </div>
         </div>
         </div>
+        {!recording && (
+          <div
+            data-preview-only="true"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1 select-none cursor-ns-resize px-4 py-2 rounded-full bg-black/40 backdrop-blur-sm text-white/90 text-xs"
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              dragStateRef.current = { startY: e.clientY, startOffset: previewDragOffset };
+            }}
+            onPointerMove={(e) => {
+              if (!dragStateRef.current) return;
+              const dy = e.clientY - dragStateRef.current.startY;
+              let next = dragStateRef.current.startOffset - dy;
+              const outer = chatOuterRef.current?.clientHeight ?? 0;
+              const inner = chatInnerRef.current?.scrollHeight ?? 0;
+              const max = Math.max(0, inner - outer);
+              if (next < 0) next = 0;
+              if (next > max) next = max;
+              setPreviewDragOffset(next);
+            }}
+            onPointerUp={(e) => {
+              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              dragStateRef.current = null;
+            }}
+          >
+            <div className="w-10 h-1 rounded-full bg-white/70" />
+            <span>Arraste para rolar</span>
+          </div>
+        )}
         </div>
           {recording && (
             <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
