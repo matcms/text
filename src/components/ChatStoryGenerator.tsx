@@ -1932,7 +1932,7 @@ export default function ChatStoryGenerator() {
               ref={chatInnerRef}
               className="w-full flex flex-col justify-start p-3 gap-1"
               style={{
-                transform: `translateY(-${exportScroll}px)`,
+                transform: `translateY(-${exportScroll + (recording ? 0 : previewDragOffset)}px)`,
               }}
             >
             <AnimatePresence>
