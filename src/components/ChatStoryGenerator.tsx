@@ -1829,6 +1829,18 @@ export default function ChatStoryGenerator() {
               ? `url(${activeBackground}) center/cover no-repeat`
               : activeBackground,
           }}
+          onWheel={(e) => {
+            if (recording) return;
+            const outer = chatOuterRef.current?.clientHeight ?? 0;
+            const inner = chatInnerRef.current?.scrollHeight ?? 0;
+            const max = Math.max(0, inner - outer);
+            setPreviewDragOffset((prev) => {
+              let next = prev + e.deltaY;
+              if (next < 0) next = 0;
+              if (next > max) next = max;
+              return next;
+            });
+          }}
         >
         <div
           className="w-[92%] h-fit max-h-[65%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
