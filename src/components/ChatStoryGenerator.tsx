@@ -2075,6 +2075,48 @@ export default function ChatStoryGenerator() {
             <span>Arraste para rolar</span>
           </div>
         )}
+        {!recording && (() => {
+          const outer = chatOuterRef.current?.clientHeight ?? 0;
+          const inner = chatInnerRef.current?.scrollHeight ?? 1;
+          const max = Math.max(1, inner - outer);
+          const ratio = Math.min(1, outer / inner);
+          const thumbPct = Math.max(0.08, ratio);
+          const offsetPct = max > 0 ? (previewDragOffset / max) * (1 - thumbPct) : 0;
+          return (
+            <div
+              data-preview-only="true"
+              className="absolute right-2 top-4 bottom-4 w-2 z-40 rounded-full bg-black/20 backdrop-blur-sm cursor-ns-resize select-none"
+              onPointerDown={(e) => {
+                const rail = e.currentTarget as HTMLElement;
+                rail.setPointerCapture(e.pointerId);
+                const rect = rail.getBoundingClientRect();
+                const update = (clientY: number) => {
+                  const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+                  const pct = y / rect.height;
+                  setPreviewDragOffset(pct * max);
+                };
+                update(e.clientY);
+                (rail as any)._update = update;
+              }}
+              onPointerMove={(e) => {
+                const u = (e.currentTarget as any)._update;
+                if (u) u(e.clientY);
+              }}
+              onPointerUp={(e) => {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                (e.currentTarget as any)._update = null;
+              }}
+            >
+              <div
+                className="absolute left-0 right-0 rounded-full bg-white/80"
+                style={{
+                  top: `${offsetPct * 100}%`,
+                  height: `${thumbPct * 100}%`,
+                }}
+              />
+            </div>
+          );
+        })()}
         </div>
           {recording && (
             <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
