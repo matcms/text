@@ -10,7 +10,14 @@ const renderCensored = (text: string) => {
   return parts.map((p, i) => {
     const m = p.match(/^\(([^)]*)\)$/);
     if (m) {
-      return <span key={i}>{m[1]}</span>;
+      return (
+        <span
+          key={i}
+          style={{ background: "#111", color: "#111", borderRadius: 4, padding: "0 4px", filter: "blur(0.5px)" }}
+        >
+          {m[1]}
+        </span>
+      );
     }
     return <span key={i}>{p}</span>;
   });
