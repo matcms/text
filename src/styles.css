@@ -189,3 +189,29 @@
   background: #000;
   border-bottom-left-radius: 10px;
 }
+
+/* iMessage gray bubble tail */
+.im-tail-left::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -6px;
+  width: 14px;
+  height: 18px;
+  background: #262628;
+  border-bottom-right-radius: 14px 12px;
+  z-index: -1;
+}
+.im-tail-left::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -10px;
+  width: 10px;
+  height: 18px;
+  background: #000;
+  border-bottom-right-radius: 10px;
+}
+
+
+

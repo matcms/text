@@ -18,6 +18,14 @@ export type StoredMsg =
       type: "image";
       text: string;
       imageBlob: Blob | null;
+    }
+  | {
+      id: number;
+      side: string;
+      type: "video";
+      text: string;
+      videoBlob: Blob | null;
+      videoType: "mp4" | "gif" | null;
     };
 
 export type StoredChat = {
@@ -29,6 +37,13 @@ export type StoredChat = {
   script: string;
   messages: StoredMsg[];
   voiceMap: Record<string, string>;
+  characterPhotos?: Record<string, string>;
+};
+
+export type StoredAudio = {
+  voiceName: string;
+  text: string;
+  audioBlob: Blob | null;
 };
 
 export type StoredProject = {
@@ -39,6 +54,7 @@ export type StoredProject = {
   messageDelay: number;
   chats: StoredChat[];
   createdAt: number;
+  audioLibrary?: StoredAudio[];
 };
 
 function openDB(): Promise<IDBDatabase> {

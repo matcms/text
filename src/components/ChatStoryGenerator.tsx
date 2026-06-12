@@ -1,8 +1,90 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { toCanvas } from "html-to-image";
 import { Muxer, ArrayBufferTarget } from "webm-muxer";
 import { Progress } from "@/components/ui/progress";
+
+const VideoBubble = ({
+  src,
+  recording,
+  className,
+  msgId,
+  chatId,
+}: {
+  src: string;
+  recording: boolean;
+  className: string;
+  msgId: number;
+  chatId?: string;
+}) => {
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!src) return;
+    const video = document.createElement("video");
+    video.src = src;
+    video.muted = true;
+    video.crossOrigin = "anonymous";
+    // Seek to a visible frame (e.g., 0.1s)
+    video.currentTime = 0.1;
+    video.addEventListener("loadeddata", () => {
+      setDimensions({
+        width: video.videoWidth || 240,
+        height: video.videoHeight || 180,
+      });
+      // Small delay to ensure the frame is decoded
+      setTimeout(() => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth || 240;
+          canvas.height = video.videoHeight || 180;
+          canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+          setThumbnail(canvas.toDataURL("image/jpeg", 0.8));
+        } catch (err) {
+          console.warn("Failed to generate video thumbnail:", err);
+        }
+      }, 100);
+    });
+  }, [src]);
+
+  if (recording) {
+    const width = dimensions?.width || 240;
+    const height = dimensions?.height || 180;
+    const maxW = 240;
+    const maxH = 180;
+    let displayW = maxW;
+    let displayH = maxH;
+    if (width && height) {
+      const ratio = width / height;
+      if (ratio > maxW / maxH) {
+        displayW = maxW;
+        displayH = maxW / ratio;
+      } else {
+        displayH = maxH;
+        displayW = maxH * ratio;
+      }
+    }
+
+    return (
+      <div
+        className={`${className} video-export-placeholder`}
+        data-video-src={src}
+        data-msg-id={msgId}
+        data-chat-id={chatId}
+        style={{
+          width: `${displayW}px`,
+          height: `${displayH}px`,
+          backgroundColor: "transparent",
+        }}
+      />
+    );
+  }
+
+  return <video src={src} autoPlay muted={recording} playsInline className={className} />;
+};
 
 // Text inside (parens) is shown in the template but skipped in the TTS audio.
 const renderCensored = (text: string) => {
@@ -25,6 +107,22 @@ const renderCensored = (text: string) => {
 // Remove parenthesized segments entirely for TTS (and collapse extra whitespace).
 const stripCensors = (text: string) =>
   text.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+
+const getVideoDuration = (url: string): Promise<number> => {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.src = url;
+    video.preload = "metadata";
+    video.addEventListener("loadedmetadata", () => {
+      resolve(video.duration || 3.0);
+    });
+    video.addEventListener("error", () => {
+      resolve(3.0);
+    });
+    setTimeout(() => resolve(3.0), 3000);
+  });
+};
+
 import {
   ChevronLeft,
   Video,
@@ -43,6 +141,10 @@ import {
   Save,
   Trash2,
   FolderOpen,
+  Volume2,
+  SkipBack,
+  SkipForward,
+  Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,8 +193,20 @@ type ImgMsg = {
   type: "image";
   text: string;
   imageUrl: string | null;
+  voiceName?: string;
+  displayName?: string;
 };
-type Msg = TextMsg | ImgMsg;
+type VideoMsg = {
+  id: number;
+  side: string;
+  type: "video";
+  text: string;
+  videoUrl: string | null;
+  videoType: "mp4" | "gif" | null;
+  voiceName?: string;
+  displayName?: string;
+};
+type Msg = TextMsg | ImgMsg | VideoMsg;
 
 type Chat = {
   id: string;
@@ -141,6 +255,7 @@ const newChat = (i: number): Chat => ({
   isGroupChat: false,
   groupSubtitle: "tap here for group info",
   nameColors: {},
+  characterPhotos: {},
 });
 
 // Convert base64 (mp3) to blob URL
@@ -151,8 +266,28 @@ const base64ToBlobUrl = (b64: string, mime = "audio/mpeg") => {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 };
 
+const startOmniVoiceServerFn = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { exec } = await import("child_process");
+    const cwd = process.cwd();
+    const command = `start cmd.exe /k "cd /d ${cwd} && venv\\Scripts\\activate && python tts_server.py"`;
+    
+    return new Promise((resolve) => {
+      exec(command, (error) => {
+        if (error) {
+          console.error("Erro ao iniciar o servidor OmniVoice:", error);
+          resolve({ success: false, error: error.message });
+        } else {
+          resolve({ success: true });
+        }
+      });
+    });
+  });
+
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
+  const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "omnivoice">("elevenlabs");
+  const [omniVoiceUrl, setOmniVoiceUrl] = useState("http://localhost:8000");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
 
@@ -168,6 +303,16 @@ export default function ChatStoryGenerator() {
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Playback control bar state
+  const [currentMsgIndex, setCurrentMsgIndex] = useState(0);
+  const [totalMsgCount, setTotalMsgCount] = useState(0);
+  const [playbackElapsed, setPlaybackElapsed] = useState(0);
+  const stopRequestedRef = useRef(false);
+  const seekTargetRef = useRef<number | null>(null);
+  const playbackStartTimeRef = useRef(0);
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pauseAccumulatorRef = useRef(0);
 
   
   const [messageDelay, setMessageDelay] = useState(0);
@@ -221,12 +366,20 @@ export default function ChatStoryGenerator() {
   const [previewDragOffset, setPreviewDragOffset] = useState(0);
   const dragStateRef = useRef<{ startY: number; startOffset: number } | null>(null);
   const exportProgressRef = useRef<{ done: number; total: number } | null>(null);
+  const [exportMeasurements, setExportMeasurements] = useState<Record<string, {height: number, margin: number}[]>>({});
+  const [exportStartIndex, setExportStartIndex] = useState(0);
 
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
   const [projects, setProjects] = useState<StoredProject[]>([]);
   const [savingProject, setSavingProject] = useState(false);
+  const [generatedAudios, setGeneratedAudios] = useState<{
+    id: string;
+    voiceName: string;
+    text: string;
+    audioUrl: string;
+  }[]>([]);
 
   const refreshProjects = async () => {
     try {
@@ -326,6 +479,15 @@ export default function ChatStoryGenerator() {
               text: m.text,
               audioBlob: await urlToBlob(m.audioUrl),
             });
+          } else if (m.type === "video") {
+            messages.push({
+              id: m.id,
+              side: m.side,
+              type: "video",
+              text: m.text,
+              videoBlob: await urlToBlob(m.videoUrl),
+              videoType: m.videoType,
+            });
           } else {
             messages.push({
               id: m.id,
@@ -345,8 +507,18 @@ export default function ChatStoryGenerator() {
           script: c.script,
           messages,
           voiceMap: c.voiceMap,
+          characterPhotos: c.characterPhotos || {},
         });
       }
+      const audioLibrary = [];
+      for (const item of generatedAudios) {
+        audioLibrary.push({
+          voiceName: item.voiceName,
+          text: item.text,
+          audioBlob: await urlToBlob(item.audioUrl),
+        });
+      }
+
       const project: StoredProject = {
         id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         projectName: name,
@@ -355,6 +527,7 @@ export default function ChatStoryGenerator() {
         messageDelay,
         chats: storedChats,
         createdAt: Date.now(),
+        audioLibrary,
       };
       await saveProject(project);
       await refreshProjects();
@@ -376,24 +549,36 @@ export default function ChatStoryGenerator() {
       headerTime: c.headerTime,
       script: c.script,
       voiceMap: c.voiceMap,
-      messages: c.messages.map((m) =>
-        m.type === "text"
-          ? {
-              id: m.id,
-              side: m.side,
-              type: "text",
-              voiceName: m.voiceName,
-              text: m.text,
-              audioUrl: m.audioBlob ? URL.createObjectURL(m.audioBlob) : null,
-            }
-          : {
-              id: m.id,
-              side: m.side,
-              type: "image",
-              text: m.text,
-              imageUrl: m.imageBlob ? URL.createObjectURL(m.imageBlob) : null,
-            }
-      ),
+      characterPhotos: c.characterPhotos || {},
+      messages: c.messages.map((m) => {
+        if (m.type === "text") {
+          return {
+            id: m.id,
+            side: m.side,
+            type: "text",
+            voiceName: m.voiceName,
+            text: m.text,
+            audioUrl: m.audioBlob ? URL.createObjectURL(m.audioBlob) : null,
+          };
+        } else if (m.type === "video") {
+          return {
+            id: m.id,
+            side: m.side,
+            type: "video",
+            text: m.text,
+            videoUrl: m.videoBlob ? URL.createObjectURL(m.videoBlob) : null,
+            videoType: m.videoType,
+          };
+        } else {
+          return {
+            id: m.id,
+            side: m.side,
+            type: "image",
+            text: m.text,
+            imageUrl: m.imageBlob ? URL.createObjectURL(m.imageBlob) : null,
+          };
+        }
+      }),
     }));
     setChats(loadedChats);
     setActiveChatId(loadedChats[0]?.id || "");
@@ -401,6 +586,40 @@ export default function ChatStoryGenerator() {
     setIsGroupChat(p.isGroupChat);
     setMessageDelay(p.messageDelay);
     setProjectName(p.projectName);
+
+    // Extract audios from loaded project and set generatedAudios
+    const initialAudios: { id: string; voiceName: string; text: string; audioUrl: string }[] = [];
+    
+    if (p.audioLibrary) {
+      p.audioLibrary.forEach((item) => {
+        if (item.audioBlob) {
+          const url = URL.createObjectURL(item.audioBlob);
+          initialAudios.push({
+            id: `${item.voiceName}_${item.text}`,
+            voiceName: item.voiceName,
+            text: item.text,
+            audioUrl: url,
+          });
+        }
+      });
+    }
+
+    loadedChats.forEach((c) => {
+      c.messages.forEach((m) => {
+        if (m.type === "text" && m.audioUrl) {
+          initialAudios.push({
+            id: `${m.voiceName}_${m.text}`,
+            voiceName: m.voiceName,
+            text: m.text,
+            audioUrl: m.audioUrl,
+          });
+        }
+      });
+    });
+    const uniqueMap = new Map<string, typeof initialAudios[number]>();
+    initialAudios.forEach((x) => uniqueMap.set(`${x.voiceName}_${x.text}`, x));
+    setGeneratedAudios(Array.from(uniqueMap.values()));
+
     setVisibleMessages([]);
     setActiveTab("editor");
   };
@@ -414,6 +633,8 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
+    setTtsProvider((localStorage.getItem("tts_provider") as "elevenlabs" | "omnivoice") || "elevenlabs");
+    setOmniVoiceUrl(localStorage.getItem("omnivoice_url") || "http://localhost:8000");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -421,6 +642,12 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
+  useEffect(() => {
+    localStorage.setItem("tts_provider", ttsProvider);
+  }, [ttsProvider]);
+  useEffect(() => {
+    localStorage.setItem("omnivoice_url", omniVoiceUrl);
+  }, [omniVoiceUrl]);
 
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
@@ -434,6 +661,25 @@ export default function ChatStoryGenerator() {
     [activeChat.messages]
   );
 
+  const videoMessages = useMemo(
+    () => activeChat.messages.filter((m): m is VideoMsg => m.type === "video"),
+    [activeChat.messages]
+  );
+
+  const uniqueCharacters = useMemo(() => {
+    const characters = new Set<string>();
+    activeChat.messages.forEach((m) => {
+      if (m.type === "text") {
+        const name = m.displayName || m.voiceName;
+        if (name) characters.add(name);
+      }
+    });
+    Object.keys(activeChat.voiceMap).forEach((name) => {
+      characters.add(name);
+    });
+    return Array.from(characters);
+  }, [activeChat.messages, activeChat.voiceMap]);
+
   const allAudiosReady = useMemo(() => {
     const all = chats.flatMap((c) => c.messages);
     const texts = all.filter((m) => m.type === "text") as TextMsg[];
@@ -443,14 +689,22 @@ export default function ChatStoryGenerator() {
   const parseScript = () => {
     const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
 
-    type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null };
+    type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null; headerLine?: string };
     const segs: Seg[] = [];
     let cur: Seg | null = null;
+    let unnamedChatCount = 1;
 
     for (const line of lines) {
+      // Check for separator
+      if (/^---+\s*$/.test(line)) {
+        cur = null;
+        continue;
+      }
+
       const headerMatch = line.match(
         /^-\s*(?:(Direct|Group)\s+)?(Header|iMessage|Whatsapp|WhatsApp)\s*:\s*(.+)$/i,
       );
+
       if (headerMatch) {
         const modeKw = headerMatch[1]?.toLowerCase();
         const kind = headerMatch[2].toLowerCase();
@@ -459,14 +713,16 @@ export default function ChatStoryGenerator() {
           kind === "whatsapp" ? "whatsapp" : kind === "imessage" ? "imessage" : chatTheme;
         const groupMode: boolean | null =
           modeKw === "group" ? true : modeKw === "direct" ? false : null;
-        cur = { theme, contactName: name, lines: [], groupMode };
+        
+        cur = { theme, contactName: name, lines: [], groupMode, headerLine: line };
         segs.push(cur);
         continue;
       }
+
       if (!cur) {
         cur = {
           theme: chatTheme,
-          contactName: activeChat.contactName,
+          contactName: `Chat ${unnamedChatCount++}`,
           lines: [],
           groupMode: null,
         };
@@ -481,23 +737,56 @@ export default function ChatStoryGenerator() {
       return;
     }
 
+    const allOldMessages = chats.flatMap((c) => c.messages || []);
+
     const buildMessages = (segLines: string[]): Msg[] => {
       const parsed: Msg[] = [];
       let id = 0;
+      // Track the last speaker per side so image/video messages inherit the sender
+      const lastSpeakerBySide: Record<string, { voiceName: string; displayName?: string }> = {};
       for (const line of segLines) {
         const imgMatch = line.match(/^(\d):\s*img:\s*(.*)$/);
         if (imgMatch) {
+          const side = imgMatch[1];
+          const text = imgMatch[2];
+          const old = allOldMessages.find(
+            (o) => o.type === "image" && o.side === side && o.text === text
+          ) as ImgMsg | undefined;
+          const speaker = lastSpeakerBySide[side];
           parsed.push({
             id: id++,
-            side: imgMatch[1],
+            side,
             type: "image",
-            text: imgMatch[2],
-            imageUrl: null,
+            text,
+            imageUrl: old ? old.imageUrl : null,
+            voiceName: speaker?.voiceName,
+            displayName: speaker?.displayName,
+          });
+          continue;
+        }
+        const videoMatch = line.match(/^(\d):\s*video:\s*(.*)$/);
+        if (videoMatch) {
+          const side = videoMatch[1];
+          const text = videoMatch[2];
+          const old = allOldMessages.find(
+            (o) => o.type === "video" && o.side === side && o.text === text
+          ) as VideoMsg | undefined;
+          const speaker = lastSpeakerBySide[side];
+          parsed.push({
+            id: id++,
+            side,
+            type: "video",
+            text,
+            videoUrl: old ? old.videoUrl : null,
+            videoType: old ? old.videoType : null,
+            voiceName: speaker?.voiceName,
+            displayName: speaker?.displayName,
           });
           continue;
         }
         const textMatch = line.match(/^(\d):\s*(.+?)>\s*(.*)$/);
         if (textMatch) {
+          const side = textMatch[1];
           const raw = textMatch[3];
           const sepIdx = raw.indexOf("==");
           const displayText = sepIdx >= 0 ? raw.slice(0, sepIdx).trim() : raw;
@@ -506,15 +795,29 @@ export default function ChatStoryGenerator() {
           const dashIdx = speaker.indexOf("-");
           const voiceName = dashIdx >= 0 ? speaker.slice(0, dashIdx).trim() : speaker;
           const displayName = dashIdx >= 0 ? speaker.slice(dashIdx + 1).trim() : undefined;
+
+          // Track speaker for this side
+          lastSpeakerBySide[side] = { voiceName, displayName };
+
+          // Look up old audio by side, speaker name and text
+          const old = allOldMessages.find(
+            (o) =>
+              o.type === "text" &&
+              o.side === side &&
+              o.voiceName.toLowerCase() === voiceName.toLowerCase() &&
+              (o.text.toLowerCase() === displayText.toLowerCase() ||
+                (o.spokenText && o.spokenText.toLowerCase() === spokenText?.toLowerCase()))
+          ) as TextMsg | undefined;
+
           parsed.push({
             id: id++,
-            side: textMatch[1],
+            side,
             type: "text",
             voiceName,
             displayName,
             text: displayText,
             spokenText,
-            audioUrl: null,
+            audioUrl: old ? old.audioUrl : null,
           });
         }
       }
@@ -534,29 +837,42 @@ export default function ChatStoryGenerator() {
 
       const resolvedGroup = s.groupMode ?? (i === 0 ? activeChat.isGroupChat ?? isGroupChat : false);
 
+      const segmentScript = [s.headerLine, ...s.lines].filter(Boolean).join("\n");
+
       if (i === 0) {
         return {
           ...activeChat,
+          name: s.contactName,
           contactName: s.contactName,
           messages,
           voiceMap,
           isGroupChat: resolvedGroup,
+          script: segmentScript,
         };
       }
       return {
         id: `chat_${Date.now()}_${i}`,
-        name: `Chat ${i + 1}`,
+        name: s.contactName,
         contactName: s.contactName,
         contactPhoto: null,
         headerTime: "23",
-        script: "",
+        script: segmentScript,
         messages,
         voiceMap,
         isGroupChat: resolvedGroup,
+        characterPhotos: {},
       };
     });
 
-    setChats(newChats);
+    const activeIndex = chats.findIndex((c) => c.id === activeChatId);
+    const updatedChatsList = [...chats];
+    if (activeIndex >= 0) {
+      updatedChatsList.splice(activeIndex, 1, ...newChats);
+    } else {
+      updatedChatsList.push(...newChats);
+    }
+
+    setChats(updatedChatsList);
     setActiveChatId(newChats[0].id);
     if (newChats[0].isGroupChat !== undefined) setIsGroupChat(!!newChats[0].isGroupChat);
     setVisibleMessages([]);
@@ -572,6 +888,44 @@ export default function ChatStoryGenerator() {
 
   const onUploadImage = (id: number, file: File) => {
     setImageUrlFor(id, URL.createObjectURL(file));
+  };
+
+  const detectVideoType = (urlOrFile: string | File): "mp4" | "gif" | null => {
+    if (typeof urlOrFile === "string") {
+      const clean = urlOrFile.split("?")[0].split("#")[0].toLowerCase();
+      if (clean.endsWith(".gif")) return "gif";
+      if (clean.endsWith(".mp4") || clean.endsWith(".webm")) return "mp4";
+      if (urlOrFile.startsWith("data:")) {
+        if (urlOrFile.includes("image/gif")) return "gif";
+        if (urlOrFile.includes("video/mp4") || urlOrFile.includes("video/webm")) return "mp4";
+      }
+      return "mp4";
+    } else {
+      const mime = urlOrFile.type;
+      const name = urlOrFile.name.toLowerCase();
+      if (mime.includes("gif") || name.endsWith(".gif")) return "gif";
+      if (mime.includes("mp4") || mime.includes("webm") || name.endsWith(".mp4") || name.endsWith(".webm")) return "mp4";
+      return "mp4";
+    }
+  };
+
+  const setVideoUrlFor = (id: number, url: string | null) => {
+    const videoType = url ? detectVideoType(url) : null;
+    updateActiveChat({
+      messages: activeChat.messages.map((m) =>
+        m.id === id && m.type === "video" ? { ...m, videoUrl: url, videoType } : m
+      ),
+    });
+  };
+
+  const onUploadVideo = (id: number, file: File) => {
+    const url = URL.createObjectURL(file);
+    const videoType = detectVideoType(file);
+    updateActiveChat({
+      messages: activeChat.messages.map((m) =>
+        m.id === id && m.type === "video" ? { ...m, videoUrl: url, videoType } : m
+      ),
+    });
   };
 
   const onUploadContactPhoto = (file: File) => {
@@ -596,6 +950,41 @@ export default function ChatStoryGenerator() {
       }
     } catch {
       alert("Não foi possível ler o clipboard.");
+    }
+  };
+
+  const pasteCharacterPhoto = async (name: string) => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const imgType = it.types.find((t) => t.startsWith("image/"));
+        if (imgType) {
+          const blob = await it.getType(imgType);
+          const reader = new FileReader();
+          reader.onload = () => {
+            const b64 = String(reader.result || "");
+            updateActiveChat({
+              characterPhotos: {
+                ...(activeChat.characterPhotos || {}),
+                [name]: b64,
+              },
+            });
+          };
+          reader.readAsDataURL(blob);
+          return;
+        }
+      }
+      const text = await navigator.clipboard.readText();
+      if (text && /^https?:\/\//i.test(text.trim())) {
+        updateActiveChat({
+          characterPhotos: {
+            ...(activeChat.characterPhotos || {}),
+            [name]: text.trim(),
+          },
+        });
+      }
+    } catch {
+      alert("Não foi possível ler o clipboard para o personagem.");
     }
   };
 
@@ -640,12 +1029,161 @@ export default function ChatStoryGenerator() {
     return URL.createObjectURL(blob);
   };
 
+  const findReferenceAudio = async (
+    voiceName: string,
+    chatId: string,
+    localMessagesMap?: Record<string, Msg[]>
+  ): Promise<Blob | null> => {
+    // 1. Search in the active/current chat messages
+    const currentChatMessages = localMessagesMap
+      ? localMessagesMap[chatId]
+      : chats.find((c) => c.id === chatId)?.messages;
+
+    if (currentChatMessages) {
+      for (const msg of currentChatMessages) {
+        if (
+          msg.type === "text" &&
+          msg.voiceName.toLowerCase() === voiceName.toLowerCase() &&
+          msg.audioUrl
+        ) {
+          try {
+            const res = await fetch(msg.audioUrl);
+            if (res.ok) {
+              const blob = await res.blob();
+              // A valid audio blob should be larger than 1000 bytes (error JSONs are small)
+              if (blob && blob.size > 1000) return blob;
+            }
+          } catch (err) {
+            console.error("Erro ao carregar blob de áudio de referência do chat ativo:", err);
+          }
+        }
+      }
+    }
+
+    // 2. Search in other chats if not found in current chat
+    if (localMessagesMap) {
+      for (const [cId, messages] of Object.entries(localMessagesMap)) {
+        if (cId === chatId) continue;
+        for (const msg of messages) {
+          if (
+            msg.type === "text" &&
+            msg.voiceName.toLowerCase() === voiceName.toLowerCase() &&
+            msg.audioUrl
+          ) {
+            try {
+              const res = await fetch(msg.audioUrl);
+              if (res.ok) {
+                const blob = await res.blob();
+                if (blob && blob.size > 1000) return blob;
+              }
+            } catch (err) {
+              console.error("Erro ao carregar blob de áudio de referência de outro chat:", err);
+            }
+          }
+        }
+      }
+    } else {
+      for (const chat of chats) {
+        if (chat.id === chatId) continue;
+        for (const msg of chat.messages) {
+          if (
+            msg.type === "text" &&
+            msg.voiceName.toLowerCase() === voiceName.toLowerCase() &&
+            msg.audioUrl
+          ) {
+            try {
+              const res = await fetch(msg.audioUrl);
+              if (res.ok) {
+                const blob = await res.blob();
+                // A valid audio blob should be larger than 1000 bytes
+                if (blob && blob.size > 1000) return blob;
+              }
+            } catch (err) {
+              console.error("Erro ao carregar blob de áudio de referência de outro chat:", err);
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const ttsOmniVoice = async (
+    text: string,
+    voiceName: string,
+    chatId: string,
+    localMessagesMap?: Record<string, Msg[]>
+  ): Promise<string> => {
+    let refBlob = await findReferenceAudio(voiceName, chatId, localMessagesMap);
+    if (!refBlob) {
+      if (!elevenKey) {
+        throw new Error(
+          `Nenhum áudio de referência encontrado no histórico para "${voiceName}". Insira sua API Key do ElevenLabs nas configurações para gerar o primeiro áudio de referência automaticamente.`
+        );
+      }
+      const chat = chats.find((c) => c.id === chatId);
+      let voiceId = (chat?.voiceMap[voiceName] || "").trim();
+      if (!voiceId) {
+        const sv = savedVoices.find(
+          (v) => v.name.toLowerCase() === voiceName.toLowerCase()
+        );
+        if (sv) voiceId = sv.voiceId;
+      }
+      if (!voiceId) voiceId = voiceName.trim();
+      if (!voiceId) {
+        throw new Error(
+          `Nenhum Voice ID encontrado para "${voiceName}". Defina o Voice ID do personagem nas configurações para que a referência possa ser gerada via ElevenLabs.`
+        );
+      }
+
+      toast.info(`Gerando primeiro áudio de "${voiceName}" via ElevenLabs para servir de referência local...`, {
+        duration: 5000,
+      });
+
+      const elevenUrl = await ttsElevenLabs(stripCensors(text), voiceId);
+      return elevenUrl;
+    }
+
+    console.log("Enviando áudio de referência para OmniVoice:", {
+      voiceName,
+      size: refBlob.size,
+      type: refBlob.type
+    });
+
+    const formData = new FormData();
+    formData.append("text", text);
+    formData.append("reference_audio", refBlob, "reference.mp3");
+
+    const res = await fetch(`${omniVoiceUrl}/tts`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let parsedErr = errText;
+      try {
+        const json = JSON.parse(errText);
+        if (json.error) parsedErr = json.error;
+      } catch {}
+      throw new Error(`OmniVoice: ${parsedErr}`);
+    }
+
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  };
+
   // Reusable single-message audio generator (resolves voice from chat voiceMap, savedVoices, or raw id)
   const generateSingleAudio = async (
     text: string,
     voiceIdentifier: string,
     chatId: string
   ): Promise<string> => {
+    if (ttsProvider === "omnivoice") {
+      return ttsOmniVoice(text, voiceIdentifier, chatId);
+    }
+
     if (!elevenKey) throw new Error("API key do ElevenLabs ausente.");
     const chat = chats.find((c) => c.id === chatId);
     let voiceId = (chat?.voiceMap[voiceIdentifier] || "").trim();
@@ -684,6 +1222,24 @@ export default function ChatStoryGenerator() {
         activeChat.id
       );
       updateTextMessage(msgId, { audioUrl: url });
+      setGeneratedAudios((prev) => {
+        const filtered = prev.filter(
+          (x) =>
+            !(
+              x.voiceName.toLowerCase() === msg.voiceName.toLowerCase() &&
+              x.text.toLowerCase() === msg.text.toLowerCase()
+            )
+        );
+        return [
+          ...filtered,
+          {
+            id: `${msg.voiceName}_${msg.text}`,
+            voiceName: msg.voiceName,
+            text: msg.text,
+            audioUrl: url,
+          },
+        ];
+      });
     } catch (e) {
       console.error(e);
       alert(`Falha ao regenerar áudio: ${(e as Error).message}`);
@@ -692,19 +1248,28 @@ export default function ChatStoryGenerator() {
     }
   };
 
-  const generateAudios = async () => {
-    if (!elevenKey) {
+  const generateAudios = async (resumeOnly?: boolean) => {
+    if (ttsProvider === "elevenlabs" && !elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
       return;
     }
 
-    
-
     const allTexts = chats.flatMap((c) =>
-      c.messages.filter((m) => m.type === "text").map((m) => ({ chatId: c.id, msg: m as TextMsg }))
+      c.messages
+        .filter((m) => {
+          if (m.type !== "text") return false;
+          if (resumeOnly && (m as TextMsg).audioUrl) return false;
+          return true;
+        })
+        .map((m) => ({ chatId: c.id, msg: m as TextMsg }))
     );
+
     if (allTexts.length === 0) {
-      alert("Faça o parse do script primeiro.");
+      if (resumeOnly) {
+        alert("Todos os áudios já foram gerados!");
+      } else {
+        alert("Faça o parse do script primeiro.");
+      }
       return;
     }
 
@@ -715,21 +1280,51 @@ export default function ChatStoryGenerator() {
     const chatMessagesMap: Record<string, Msg[]> = {};
     chats.forEach((c) => (chatMessagesMap[c.id] = [...c.messages]));
 
+    let accumulatedAudios = [...generatedAudios];
+
     for (const { chatId, msg } of allTexts) {
       const chat = chats.find((c) => c.id === chatId)!;
       const voiceId = (chat.voiceMap[msg.voiceName] || "").trim();
-      if (!voiceId) {
+      if (ttsProvider === "elevenlabs" && !voiceId) {
         alert(`Defina o Voice ID para "${msg.voiceName}" no chat "${chat.name}".`);
         setGenerating(false);
         return;
       }
       try {
-        const audioUrl = await ttsElevenLabs(stripCensors(msg.spokenText ?? msg.text), voiceId);
+        let audioUrl: string;
+        if (ttsProvider === "omnivoice") {
+          audioUrl = await ttsOmniVoice(
+            stripCensors(msg.spokenText ?? msg.text),
+            msg.voiceName,
+            chatId,
+            chatMessagesMap
+          );
+        } else {
+          audioUrl = await ttsElevenLabs(stripCensors(msg.spokenText ?? msg.text), voiceId);
+        }
 
         const arr = chatMessagesMap[chatId];
         const idx = arr.findIndex((m) => m.id === msg.id && m.type === "text");
         if (idx >= 0) arr[idx] = { ...(arr[idx] as TextMsg), audioUrl };
         updateChatById(chatId, { messages: [...arr] });
+
+        accumulatedAudios = [
+          ...accumulatedAudios.filter(
+            (x) =>
+              !(
+                x.voiceName.toLowerCase() === msg.voiceName.toLowerCase() &&
+                x.text.toLowerCase() === msg.text.toLowerCase()
+              )
+          ),
+          {
+            id: `${msg.voiceName}_${msg.text}`,
+            voiceName: msg.voiceName,
+            text: msg.text,
+            audioUrl,
+          },
+        ];
+        setGeneratedAudios(accumulatedAudios);
+
       } catch (e) {
         console.error(e);
         alert(`Falha ao gerar áudio para "${msg.voiceName}": ${msg.text}\n${(e as Error).message}`);
@@ -767,15 +1362,36 @@ export default function ChatStoryGenerator() {
   };
 
   const playAnimation = async (onFrameReady?: () => Promise<void>) => {
+    // Compute total message count across all chats
+    const totalMsgs = chats.reduce((sum, c) => sum + c.messages.length, 0);
+    setTotalMsgCount(totalMsgs);
+    setCurrentMsgIndex(0);
+    setPlaybackElapsed(0);
+    pauseAccumulatorRef.current = 0;
+    stopRequestedRef.current = false;
+    seekTargetRef.current = null;
     setPlaying(true);
     setPaused(false);
     pausedRef.current = false;
+    playbackStartTimeRef.current = Date.now();
+
+    // Start elapsed timer
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+    elapsedTimerRef.current = setInterval(() => {
+      if (!pausedRef.current) {
+        const now = Date.now();
+        setPlaybackElapsed(now - playbackStartTimeRef.current - pauseAccumulatorRef.current);
+      }
+    }, 200);
+
     const delayMs = Number(messageDelay) || 0;
     const scrollDown = () => {
       const el = chatScrollRef.current;
       if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     };
+    let globalIdx = 0;
     for (let c = 0; c < chats.length; c++) {
+      if (stopRequestedRef.current) break;
       const chat = chats[c];
       setPlayingChatId(chat.id);
       setActiveChatId(chat.id);
@@ -784,9 +1400,67 @@ export default function ChatStoryGenerator() {
       if (onFrameReady) await onFrameReady();
       const queue: Msg[] = [];
       for (let i = 0; i < chat.messages.length; i++) {
+        if (stopRequestedRef.current) break;
+
+        // Handle seek: if user clicked on progress bar to go to an earlier point
+        const seekTarget = seekTargetRef.current;
+        if (seekTarget !== null) {
+          seekTargetRef.current = null;
+          // If seek target is in a previous chat, restart from beginning
+          // For simplicity, seeking only within current playback scope
+          if (seekTarget < globalIdx) {
+            // Rebuild queue up to seekTarget within current chat context
+            let targetChatIdx = 0;
+            let targetMsgIdx = 0;
+            let acc = 0;
+            for (let ci = 0; ci < chats.length; ci++) {
+              if (acc + chats[ci].messages.length > seekTarget) {
+                targetChatIdx = ci;
+                targetMsgIdx = seekTarget - acc;
+                break;
+              }
+              acc += chats[ci].messages.length;
+            }
+            // Jump to the target chat
+            c = targetChatIdx;
+            const targetChat = chats[c];
+            setPlayingChatId(targetChat.id);
+            setActiveChatId(targetChat.id);
+            queue.length = 0;
+            for (let j = 0; j <= targetMsgIdx; j++) {
+              queue.push(targetChat.messages[j]);
+            }
+            setVisibleMessages([...queue]);
+            globalIdx = seekTarget + 1;
+            setCurrentMsgIndex(globalIdx);
+            i = targetMsgIdx;
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            scrollDown();
+            if (onFrameReady) await onFrameReady();
+            continue;
+          } else if (seekTarget > globalIdx) {
+            // Fast-forward: skip to target
+            while (globalIdx < seekTarget && i < chat.messages.length) {
+              queue.push(chat.messages[i]);
+              i++;
+              globalIdx++;
+            }
+            setVisibleMessages([...queue]);
+            setCurrentMsgIndex(globalIdx);
+            i--; // will be incremented by for loop
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            scrollDown();
+            if (onFrameReady) await onFrameReady();
+            continue;
+          }
+        }
+
         await waitWhilePaused();
+        if (stopRequestedRef.current) break;
         const msg = chat.messages[i];
         queue.push(msg);
+        globalIdx++;
+        setCurrentMsgIndex(globalIdx);
         setVisibleMessages([...queue]);
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         scrollDown();
@@ -818,12 +1492,20 @@ export default function ChatStoryGenerator() {
         if (msg.type === "image") {
           await waitInterruptible(2000);
         }
+        if (msg.type === "video") {
+          const durationSec = msg.videoUrl ? await getVideoDuration(msg.videoUrl) : 3.0;
+          await waitInterruptible(durationSec * 1000);
+        }
         if (exportProgressRef.current) {
           exportProgressRef.current.done += 1;
           const { done, total } = exportProgressRef.current;
           setExportProgress(total ? (done / total) * 100 : 0);
         }
       }
+    }
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
     }
     setPlayingChatId(null);
     setPlaying(false);
@@ -835,27 +1517,164 @@ export default function ChatStoryGenerator() {
     const next = !pausedRef.current;
     pausedRef.current = next;
     setPaused(next);
+    if (next) {
+      // Record when we paused
+      (togglePause as any)._pauseStart = Date.now();
+    } else {
+      // Accumulate paused duration
+      const ps = (togglePause as any)._pauseStart;
+      if (ps) pauseAccumulatorRef.current += Date.now() - ps;
+      (togglePause as any)._pauseStart = null;
+    }
     const audio = currentAudioRef.current;
     if (audio) {
       if (next) audio.pause();
       else audio.play().catch(() => {});
     }
+
+    // Play/Pause DOM video elements in preview container
+    const videos = previewRef.current?.querySelectorAll("video");
+    if (videos) {
+      videos.forEach((video) => {
+        if (next) video.pause();
+        else video.play().catch(() => {});
+      });
+    }
   };
 
-  const exportVideoFast = async () => {
+  const stopPlayback = () => {
+    stopRequestedRef.current = true;
+    pausedRef.current = false;
+    setPaused(false);
+    const audio = currentAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      currentAudioRef.current = null;
+    }
+
+    // Pause and reset DOM video elements in preview container
+    const videos = previewRef.current?.querySelectorAll("video");
+    if (videos) {
+      videos.forEach((video) => {
+        try {
+          video.pause();
+          video.currentTime = 0;
+        } catch {}
+      });
+    }
+
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
+    }
+  };
+
+  const seekTo = (targetIndex: number) => {
+    seekTargetRef.current = Math.max(0, Math.min(targetIndex, totalMsgCount));
+    // If paused, unpause so seek can process
+    if (pausedRef.current) {
+      pausedRef.current = false;
+      setPaused(false);
+    }
+    // Stop current audio if playing
+    const audio = currentAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      currentAudioRef.current = null;
+    }
+  };
+
+  const skipBackward = () => {
+    const target = Math.max(0, currentMsgIndex - 5);
+    seekTo(target);
+  };
+
+  const skipForward = () => {
+    const target = Math.min(totalMsgCount, currentMsgIndex + 5);
+    seekTo(target);
+  };
+
+  const formatTime = (ms: number) => {
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const exportVideoFast = async (exportAll?: boolean) => {
     if (!previewRef.current) return;
     if (!allAudiosReady) {
       alert("Gere os áudios primeiro.");
       return;
     }
 
-    const messages = displayChat.messages;
+    const messages = exportAll
+      ? chats.flatMap((c) => c.messages.map((m) => ({ ...m, chatId: c.id })))
+      : displayChat.messages;
     if (messages.length === 0) return;
 
     if (typeof (window as any).VideoEncoder === "undefined" || typeof (window as any).AudioEncoder === "undefined") {
       alert("Seu navegador não suporta a exportação avançada. Use o Google Chrome no PC.");
       return;
     }
+
+    const videoCache = new Map<string, HTMLVideoElement>();
+    const isWA = chatTheme === "whatsapp";
+
+    const getVideoElement = async (url: string): Promise<HTMLVideoElement> => {
+      if (videoCache.has(url)) {
+        return videoCache.get(url)!;
+      }
+      const video = document.createElement("video");
+      video.src = url;
+      video.muted = true;
+      video.crossOrigin = "anonymous";
+      video.playsInline = true;
+      videoCache.set(url, video);
+      
+      await new Promise<void>((resolve, reject) => {
+        const onLoaded = () => {
+          video.removeEventListener("loadedmetadata", onLoaded);
+          video.removeEventListener("error", onError);
+          resolve();
+        };
+        const onError = (e: any) => {
+          video.removeEventListener("loadedmetadata", onLoaded);
+          video.removeEventListener("error", onError);
+          reject(new Error(`Failed to load video: ${url}`));
+        };
+        video.addEventListener("loadedmetadata", onLoaded);
+        video.addEventListener("error", onError);
+        
+        if (video.readyState >= 1) {
+          onLoaded();
+        }
+      });
+      return video;
+    };
+
+    const seekVideo = async (video: HTMLVideoElement, time: number) => {
+      const duration = video.duration || 1;
+      // Seek at most to duration - 0.05 to freeze on the last frame instead of looping.
+      // Clamp between 0 and duration, handling very short videos safely.
+      const targetTime = Math.max(0, Math.min(time, Math.max(0.01, duration - 0.05)));
+      
+      return new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        video.currentTime = targetTime;
+        
+        setTimeout(() => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        }, 150);
+      });
+    };
 
     setRecording(true);
     setExportProgress(1);
@@ -870,6 +1689,32 @@ export default function ChatStoryGenerator() {
 
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
+        if (msg.type === "image") {
+          tracksInfo.push({ buffer: null, duration: 2.0 });
+          totalDurationSec += 2.0;
+          continue;
+        }
+        if (msg.type === "video") {
+          const url = msg.videoUrl;
+          if (url) {
+            try {
+              const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+              const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+              const durationSec = audioBuffer.duration;
+              tracksInfo.push({ buffer: audioBuffer, duration: durationSec });
+              totalDurationSec += durationSec;
+            } catch (videoAudioErr) {
+              console.warn(`No audio or failed decoding audio for video ${i}`, videoAudioErr);
+              const durationSec = await getVideoDuration(url);
+              tracksInfo.push({ buffer: null, duration: durationSec });
+              totalDurationSec += durationSec;
+            }
+          } else {
+            tracksInfo.push({ buffer: null, duration: 3.0 });
+            totalDurationSec += 3.0;
+          }
+          continue;
+        }
         const url = msg.type === "text" ? (msg as any).audioUrl : null;
         if (!url) {
           tracksInfo.push({ buffer: null, duration: 2.5 });
@@ -907,6 +1752,13 @@ export default function ChatStoryGenerator() {
       }
       const renderedAudio = await offlineCtx.startRendering();
       try { audioCtx.close(); } catch {}
+
+      const startTimesSec: number[] = [];
+      let currentAcc = 0;
+      for (let j = 0; j < messages.length; j++) {
+        startTimesSec.push(currentAcc);
+        currentAcc += tracksInfo[j].duration;
+      }
 
       // 2) Setup muxer + encoders
       const muxer = new Muxer({
@@ -955,7 +1807,45 @@ export default function ChatStoryGenerator() {
       }
 
       // 4) Render frames
-      setPlayingChatId(activeChatId);
+      // Measure all messages first to allow O(1) DOM rendering
+      const measurementsByChat: Record<string, { height: number; margin: number }[]> = {};
+      if (exportAll) {
+        for (const chat of chats) {
+          setPlayingChatId(chat.id);
+          // Wait for DOM to render the messages of this chat
+          await new Promise((r) => setTimeout(r, 60));
+          const measurements: { height: number; margin: number }[] = [];
+          if (chatInnerRef.current) {
+            const children = chatInnerRef.current.children;
+            for (let j = 0; j < children.length; j++) {
+              const style = window.getComputedStyle(children[j]);
+              measurements.push({
+                height: (children[j] as HTMLElement).offsetHeight,
+                margin: parseFloat(style.marginBottom) || 0
+              });
+            }
+          }
+          measurementsByChat[chat.id] = measurements;
+        }
+      } else {
+        const measurements: { height: number; margin: number }[] = [];
+        if (chatInnerRef.current) {
+          const children = chatInnerRef.current.children;
+          for (let j = 0; j < children.length; j++) {
+            const style = window.getComputedStyle(children[j]);
+            measurements.push({
+              height: (children[j] as HTMLElement).offsetHeight,
+              margin: parseFloat(style.marginBottom) || 0
+            });
+          }
+        }
+        measurementsByChat[activeChatId] = measurements;
+      }
+      setExportMeasurements(measurementsByChat);
+      setExportStartIndex(0);
+
+      const initialChatId = exportAll && messages[0] ? (messages[0] as any).chatId : activeChatId;
+      setPlayingChatId(initialChatId);
       setPlaying(true);
       setVisibleMessages([]);
       setExportScroll(0);
@@ -972,7 +1862,21 @@ export default function ChatStoryGenerator() {
 
       for (let i = 0; i < messages.length; i++) {
         setExportProgress(10 + (i / messages.length) * 80);
-        setVisibleMessages(messages.slice(0, i + 1));
+        const msgChatId = (messages[i] as any).chatId || activeChatId;
+        if (exportAll) {
+          setPlayingChatId(msgChatId);
+          const currentChatMessagesCount = messages.slice(0, i + 1).filter((m) => (m as any).chatId === msgChatId).length;
+          const localMsgIndex = currentChatMessagesCount - 1;
+          setExportStartIndex(Math.max(0, localMsgIndex - 12));
+        } else {
+          setExportStartIndex(Math.max(0, i - 12));
+        }
+
+        const currentChatMessages = exportAll
+          ? messages.slice(0, i + 1).filter((m) => (m as any).chatId === msgChatId)
+          : messages.slice(0, i + 1);
+
+        setVisibleMessages(currentChatMessages);
         await new Promise((r) => setTimeout(r, 50));
 
         if (chatOuterRef.current && chatInnerRef.current) {
@@ -986,11 +1890,58 @@ export default function ChatStoryGenerator() {
         }
         await new Promise((r) => setTimeout(r, 50));
 
+        // Locate and measure video placeholders inside previewRef
+        const placeholders = Array.from(
+          previewRef.current!.querySelectorAll(".video-export-placeholder")
+        ) as HTMLElement[];
+
+        const parentRect = previewRef.current!.getBoundingClientRect();
+        const scale = 1080 / (parentRect.width || 1);
+
+        // Bounding rect for scroll container (chatOuterRef) in canvas space
+        let outerX = 0, outerY = 0, outerW = 1080, outerH = 1920;
+        if (chatOuterRef.current) {
+          const outerRect = chatOuterRef.current.getBoundingClientRect();
+          outerX = (outerRect.left - parentRect.left) * scale;
+          outerY = (outerRect.top - parentRect.top) * scale;
+          outerW = outerRect.width * scale;
+          outerH = outerRect.height * scale;
+        }
+
+        const measuredPlaceholders = placeholders.map((placeholder) => {
+          const rect = placeholder.getBoundingClientRect();
+
+          const targetX = (rect.left - parentRect.left) * scale;
+          const targetY = (rect.top - parentRect.top) * scale;
+          const targetW = rect.width * scale;
+          const targetH = rect.height * scale;
+
+          const videoUrl = placeholder.getAttribute("data-video-src") || "";
+          const msgIdAttr = placeholder.getAttribute("data-msg-id");
+          const msgId = msgIdAttr ? parseInt(msgIdAttr, 10) : -1;
+          const msgChatIdAttr = placeholder.getAttribute("data-chat-id");
+          const msgIndex = messages.findIndex((m) => {
+            if (m.id !== msgId) return false;
+            if (msgChatIdAttr && (m as any).chatId && (m as any).chatId !== msgChatIdAttr) return false;
+            return true;
+          });
+          const videoStartSec = msgIndex >= 0 ? startTimesSec[msgIndex] : 0;
+
+          return {
+            videoUrl,
+            videoStartSec,
+            targetX,
+            targetY,
+            targetW,
+            targetH,
+          };
+        }).filter((item) => !!item.videoUrl);
+
         // Take ONE static high-res screenshot WITH SAFE FALLBACK
         let tempCanvas: HTMLCanvasElement | null = null;
         try {
           tempCanvas = await toCanvas(previewRef.current!, {
-            pixelRatio: 2,
+            pixelRatio: 2, // Restored back to 2 since memory is now O(1)
             cacheBust: false, // CRITICAL: true can break blob URIs
             skipFonts: true, // CRITICAL: prevents font loading Event timeouts
             useCORS: true,
@@ -1000,7 +1951,6 @@ export default function ChatStoryGenerator() {
           } as any);
         } catch (imgErr) {
           console.warn("Canvas capture failed for frame", i, ". Reusing previous frame.", imgErr);
-          // tempCanvas remains null. Reuse the previous frame already on ctx1080.
         }
 
         if (tempCanvas) {
@@ -1012,21 +1962,90 @@ export default function ChatStoryGenerator() {
 
         const durationSec = tracksInfo[i]?.duration || 0;
         const framesToEncode = Math.max(1, Math.round(durationSec * fps));
-        const bitmap = await createImageBitmap(canvas1080);
+        const staticBitmap = await createImageBitmap(canvas1080);
+
+        const waitEncoderQueue = async () => {
+          while (videoEncoder.encodeQueueSize > 5) {
+            await new Promise((r) => setTimeout(r, 20));
+          }
+        };
 
         for (let f = 0; f < framesToEncode; f++) {
-          const frame = new (window as any).VideoFrame(bitmap, { timestamp: Math.round(timestampUs) });
+          // Clear and restore static background
+          ctx1080.clearRect(0, 0, 1080, 1920);
+          ctx1080.drawImage(staticBitmap, 0, 0);
+
+          if (measuredPlaceholders.length > 0) {
+            // Seek all videos in parallel
+            await Promise.all(
+              measuredPlaceholders.map(async (item) => {
+                try {
+                  const video = await getVideoElement(item.videoUrl);
+                  const currentFrameTimeSec = timestampUs / 1_000_000;
+                  const elapsed = currentFrameTimeSec - item.videoStartSec;
+                  await seekVideo(video, elapsed);
+                } catch (err) {
+                  console.warn("Failed to seek video", item.videoUrl, err);
+                }
+              })
+            );
+
+            // Draw video frames on top with rounded borders
+            for (const item of measuredPlaceholders) {
+              try {
+                const video = await getVideoElement(item.videoUrl);
+                ctx1080.save();
+
+                // Clip to the scroll container bounds to prevent overflowing the header or phone frame
+                if (chatOuterRef.current) {
+                  ctx1080.beginPath();
+                  ctx1080.rect(outerX, outerY, outerW, outerH);
+                  ctx1080.clip();
+                }
+
+                ctx1080.beginPath();
+                const radius = isWA ? 8 * scale : 16 * scale; // 8px for WA, 16px for iMessage
+                if (typeof ctx1080.roundRect === "function") {
+                  ctx1080.roundRect(item.targetX, item.targetY, item.targetW, item.targetH, radius);
+                } else {
+                  const x = item.targetX, y = item.targetY, w = item.targetW, h = item.targetH, r = radius;
+                  ctx1080.moveTo(x + r, y);
+                  ctx1080.arcTo(x + w, y, x + w, y + h, r);
+                  ctx1080.arcTo(x + w, y + h, x, y + h, r);
+                  ctx1080.arcTo(x, y + h, x, y, r);
+                  ctx1080.arcTo(x, y, x + w, y, r);
+                }
+                ctx1080.clip();
+                ctx1080.drawImage(video, item.targetX, item.targetY, item.targetW, item.targetH);
+                ctx1080.restore();
+              } catch (err) {
+                console.warn("Failed to draw video overlay", item.videoUrl, err);
+              }
+            }
+          }
+
+          await waitEncoderQueue();
+          const frame = new (window as any).VideoFrame(canvas1080, { timestamp: Math.round(timestampUs) });
           videoEncoder.encode(frame, { keyFrame: framesEncoded % 60 === 0 });
           frame.close();
           timestampUs += 1_000_000 / fps;
           framesEncoded++;
         }
-        bitmap.close();
+        staticBitmap.close();
+        
+        // Let the browser breathe and run Garbage Collection
+        await new Promise((r) => setTimeout(r, 100)); // Reduced back to 100ms
       }
 
       // End padding
       const endBitmap = await createImageBitmap(canvas1080);
+      const waitEncoderQueueEnd = async () => {
+        while (videoEncoder.encodeQueueSize > 5) {
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      };
       for (let f = 0; f < 30; f++) {
+        await waitEncoderQueueEnd();
         const frame = new (window as any).VideoFrame(endBitmap, { timestamp: Math.round(timestampUs) });
         videoEncoder.encode(frame);
         frame.close();
@@ -1070,6 +2089,18 @@ export default function ChatStoryGenerator() {
       }
       alert(`Falha na Exportação: ${errorMsg}`);
     } finally {
+      // Clean up cached video elements
+      if (typeof videoCache !== "undefined" && videoCache) {
+        for (const video of videoCache.values()) {
+          try {
+            video.pause();
+            video.src = "";
+            video.load();
+          } catch {}
+        }
+        videoCache.clear();
+      }
+
       setRecording(false);
       setExportProgress(0);
       setPlaying(false);
@@ -1218,17 +2249,64 @@ export default function ChatStoryGenerator() {
           </div>
 
           <div className="space-y-2">
-            <Label>ElevenLabs API Key</Label>
-            <Input
-              type="password"
-              value={elevenKey}
-              onChange={(e) => setElevenKey(e.target.value)}
-              placeholder="sk_..."
-            />
-            <p className="text-xs text-muted-foreground">
-              No script use o <strong>voice_id</strong> da voz do ElevenLabs (ex.: <code>21m00Tcm4TlvDq8ikWAM</code>).
-            </p>
+            <Label>Provedor de Voz (TTS)</Label>
+            <select
+              className="w-full h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+              value={ttsProvider}
+              onChange={(e) => setTtsProvider(e.target.value as "elevenlabs" | "omnivoice")}
+            >
+              <option value="elevenlabs">ElevenLabs (Nuvem / Pago)</option>
+              <option value="omnivoice">OmniVoice Local (Gratuito / Open-source)</option>
+            </select>
           </div>
+
+          {ttsProvider === "elevenlabs" ? (
+            <div className="space-y-2">
+              <Label>ElevenLabs API Key</Label>
+              <Input
+                type="password"
+                value={elevenKey}
+                onChange={(e) => setElevenKey(e.target.value)}
+                placeholder="sk_..."
+              />
+              <p className="text-xs text-muted-foreground">
+                No script use o <strong>voice_id</strong> da voz do ElevenLabs (ex.: <code>21m00Tcm4TlvDq8ikWAM</code>).
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Servidor OmniVoice Local</Label>
+              <Input
+                type="text"
+                value={omniVoiceUrl}
+                onChange={(e) => setOmniVoiceUrl(e.target.value)}
+                placeholder="http://localhost:8000"
+              />
+              <p className="text-xs text-muted-foreground">
+                O OmniVoice clonará automaticamente as vozes buscando áudios anteriores gerados no histórico do chat.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={async () => {
+                  try {
+                    const res = await startOmniVoiceServerFn();
+                    if ((res as any).success) {
+                      alert("Comando enviado! Uma nova janela do CMD deve se abrir em breve com o servidor OmniVoice.");
+                    } else {
+                      alert(`Erro ao abrir CMD: ${(res as any).error}`);
+                    }
+                  } catch (err) {
+                    alert(`Erro na requisição: ${(err as Error).message}`);
+                  }
+                }}
+              >
+                Abrir Terminal e Iniciar Servidor
+              </Button>
+            </div>
+          )}
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -1503,54 +2581,175 @@ export default function ChatStoryGenerator() {
           )}
         </div>
 
-        {Object.keys(activeChat.voiceMap).length > 0 && (
+        {uniqueCharacters.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
             <h2 className="font-semibold text-sm">Voice IDs por personagem</h2>
             <p className="text-xs text-muted-foreground">
-              Adicione manualmente um <code>voice_id</code> ou selecione uma voz já salva na biblioteca.
+              Configure as vozes e fotos de cada personagem. Faça upload, use o botão Colar ou selecione a linha do personagem e use <code>Ctrl+V</code>.
             </p>
-            {Object.keys(activeChat.voiceMap).map((name) => {
-              const currentId = activeChat.voiceMap[name];
+            {uniqueCharacters.map((name) => {
+              const isVoice = name in activeChat.voiceMap;
+              const currentId = isVoice ? activeChat.voiceMap[name] : "";
               const matched = savedVoices.find((v) => v.voiceId === currentId);
+              const photoInputId = `photo-input-${name}`;
+              const photoUrl = activeChat.characterPhotos?.[name];
               return (
-                <div key={name} className="space-y-1.5 border-b last:border-b-0 pb-3 last:pb-0">
-                  <Label className="text-xs">{name}</Label>
-                  <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-                    <Input
-                      className="font-mono text-xs"
-                      placeholder="Adicionar voice_id manualmente"
-                      value={currentId}
-                      onChange={(e) =>
-                        updateActiveChat({
-                          voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
-                        })
+                <div
+                  key={name}
+                  tabIndex={0}
+                  className="space-y-2 border-b last:border-b-0 pb-3 last:pb-0 focus:outline-none focus:bg-zinc-800/20 focus-visible:ring-1 focus-visible:ring-zinc-700 rounded-md p-2 -mx-2 transition-all outline-none"
+                  onPaste={(e) => {
+                    const items = e.clipboardData?.items;
+                    if (!items) return;
+                    for (const it of Array.from(items)) {
+                      if (it.type.startsWith("image/")) {
+                        const file = it.getAsFile();
+                        if (file) {
+                          e.preventDefault();
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const b64 = String(reader.result || "");
+                            updateActiveChat({
+                              characterPhotos: {
+                                ...(activeChat.characterPhotos || {}),
+                                [name]: b64,
+                              },
+                            });
+                          };
+                          reader.readAsDataURL(file);
+                          return;
+                        }
                       }
-                    />
-                    <select
-                      className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
-                      value={matched?.name || ""}
-                      onChange={(e) => {
-                        const sel = savedVoices.find((v) => v.name === e.target.value);
-                        if (sel) {
+                    }
+                    const text = e.clipboardData?.getData("text");
+                    if (text && /^https?:\/\//i.test(text.trim())) {
+                      e.preventDefault();
+                      updateActiveChat({
+                        characterPhotos: {
+                          ...(activeChat.characterPhotos || {}),
+                          [name]: text.trim(),
+                        },
+                      });
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold capitalize">{name}</Label>
+                    {!isVoice && (
+                      <span className="text-[10px] text-muted-foreground bg-zinc-800 px-1.5 py-0.5 rounded">
+                        Nome de Exibição
+                      </span>
+                    )}
+                  </div>
+                  
+                  {isVoice && (
+                    <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+                      <Input
+                        className="font-mono text-xs"
+                        placeholder="Adicionar voice_id manualmente"
+                        value={currentId}
+                        onChange={(e) =>
                           updateActiveChat({
-                            voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
-                          });
+                            voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
+                          })
+                        }
+                      />
+                      <select
+                        className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+                        value={matched?.name || ""}
+                        onChange={(e) => {
+                          const sel = savedVoices.find((v) => v.name === e.target.value);
+                          if (sel) {
+                            updateActiveChat({
+                              voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
+                            });
+                          }
+                        }}
+                      >
+                        <option value="">Selecionar voz...</option>
+                        {savedVoices.map((v) => (
+                          <option key={v.name} value={v.name}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Avatar upload / remove UI */}
+                  <div className="flex items-center gap-2 mt-1">
+                    {photoUrl ? (
+                      <img
+                        src={photoUrl}
+                        alt={name}
+                        className="h-[28px] w-[28px] rounded-full object-cover border border-zinc-700"
+                      />
+                    ) : (
+                      <div className="h-[28px] w-[28px] rounded-full bg-gradient-to-br from-zinc-600 to-zinc-800 flex items-center justify-center text-white text-[10px] font-semibold uppercase border border-zinc-700">
+                        {name.charAt(0)}
+                      </div>
+                    )}
+                    <input
+                      id={photoInputId}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const b64 = String(reader.result || "");
+                            updateActiveChat({
+                              characterPhotos: {
+                                ...(activeChat.characterPhotos || {}),
+                                [name]: b64,
+                              },
+                            });
+                          };
+                          reader.readAsDataURL(f);
                         }
                       }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 px-2"
+                      onClick={() => document.getElementById(photoInputId)?.click()}
                     >
-                      <option value="">Selecionar voz...</option>
-                      {savedVoices.map((v) => (
-                        <option key={v.name} value={v.name}>
-                          {v.name}
-                        </option>
-                      ))}
-                    </select>
+                      <Upload className="mr-1 h-3 w-3" /> Upload Foto
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 px-2"
+                      onClick={() => pasteCharacterPhoto(name)}
+                    >
+                      <ClipboardPaste className="mr-1 h-3 w-3" /> Colar
+                    </Button>
+                    {photoUrl && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-500 hover:text-red-700 text-xs h-7 px-2"
+                        onClick={() => {
+                          if (confirm(`Remover a foto de ${name}?`)) {
+                            const updated = { ...(activeChat.characterPhotos || {}) };
+                            delete updated[name];
+                            updateActiveChat({ characterPhotos: updated });
+                          }
+                        }}
+                      >
+                        Remover
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+
 
         {(() => {
           const isGroup = activeChat.isGroupChat ?? isGroupChat;
@@ -1559,7 +2758,7 @@ export default function ChatStoryGenerator() {
             new Set(
               activeChat.messages
                 .filter((m): m is TextMsg => m.type === "text")
-                .map((m) => m.displayName)
+                .map((m) => m.displayName || m.voiceName)
                 .filter((n): n is string => !!n)
             )
           );
@@ -1606,21 +2805,31 @@ export default function ChatStoryGenerator() {
           );
         })()}
 
-        <Button
-          onClick={generateAudios}
-          disabled={generating}
-          className="w-full"
-          variant="secondary"
-        >
-          {generating ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Gerando {genProgress.done}/{genProgress.total}
-            </>
-          ) : (
-            "Gerar áudios (todos os chats)"
-          )}
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full">
+          <Button
+            onClick={() => generateAudios(false)}
+            disabled={generating}
+            className="flex-1 text-xs"
+            variant="secondary"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Gerando {genProgress.done}/{genProgress.total}
+              </>
+            ) : (
+              "Gerar áudios (todos os chats)"
+            )}
+          </Button>
+          <Button
+            onClick={() => generateAudios(true)}
+            disabled={generating}
+            className="flex-1 text-xs"
+            variant="outline"
+          >
+            Continuar de Onde Parou
+          </Button>
+        </div>
 
         {/* Post-Generation Editor */}
         {(() => {
@@ -1696,6 +2905,154 @@ export default function ChatStoryGenerator() {
             </Collapsible>
           );
         })()}
+
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-sm flex items-center gap-2">
+              <Volume2 className="h-4 w-4" /> Biblioteca de Áudios ({generatedAudios.length})
+            </h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Áudios gerados nesta sessão. Útil para recuperar áudios após re-parsear o script ou vinculá-los manualmente.
+          </p>
+          
+          {generatedAudios.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic bg-zinc-900/10 p-3 rounded-md text-center">
+              Nenhum áudio gerado nesta sessão ainda.
+            </p>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 text-xs h-8"
+                  onClick={() => {
+                    let count = 0;
+                    const updatedMessages = activeChat.messages.map((m) => {
+                      if (m.type === "text" && !m.audioUrl) {
+                        const match = generatedAudios.find(
+                          (g) =>
+                            g.voiceName.toLowerCase() === m.voiceName.toLowerCase() &&
+                            g.text.toLowerCase() === m.text.toLowerCase()
+                        );
+                        if (match) {
+                          count++;
+                          return { ...m, audioUrl: match.audioUrl };
+                        }
+                      }
+                      return m;
+                    });
+                    if (count > 0) {
+                      updateActiveChat({ messages: updatedMessages });
+                      alert(`${count} áudio(s) correspondente(s) vinculado(s) ao script!`);
+                    } else {
+                      alert("Nenhum áudio correspondente pendente encontrado.");
+                    }
+                  }}
+                >
+                  Vincular Correspondentes
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-red-500 hover:text-red-700 h-8"
+                  onClick={() => {
+                    if (confirm("Limpar toda a biblioteca de áudios gerados?")) {
+                      setGeneratedAudios([]);
+                    }
+                  }}
+                >
+                  Limpar Tudo
+                </Button>
+              </div>
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                {generatedAudios.map((g, idx) => {
+                  const isLinked = activeChat.messages.some(
+                    (m) => m.type === "text" && m.audioUrl === g.audioUrl
+                  );
+                  return (
+                    <div key={idx} className="rounded-md border p-2.5 space-y-1.5 text-xs bg-zinc-900/10">
+                      <div className="flex justify-between items-center font-semibold text-zinc-300">
+                        <span className="capitalize">{g.voiceName}</span>
+                        {isLinked ? (
+                          <span className="text-[10px] text-green-500 bg-green-950/20 px-1.5 py-0.5 rounded border border-green-900/30">
+                            Vinculado
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-zinc-400 bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-700/30">
+                            Não Vinculado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground italic line-clamp-2" title={g.text}>“{g.text}”</p>
+                      <audio src={g.audioUrl} controls className="h-6 w-full mt-1" />
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="text-[10px] h-6 flex-1 px-2"
+                          disabled={isLinked}
+                          onClick={() => {
+                            let bound = false;
+                            const updatedMessages = activeChat.messages.map((m) => {
+                              if (
+                                m.type === "text" &&
+                                !m.audioUrl &&
+                                m.voiceName.toLowerCase() === g.voiceName.toLowerCase() &&
+                                m.text.toLowerCase() === g.text.toLowerCase()
+                              ) {
+                                bound = true;
+                                return { ...m, audioUrl: g.audioUrl };
+                              }
+                              return m;
+                            });
+                            if (bound) {
+                              updateActiveChat({ messages: updatedMessages });
+                              alert("Áudio correspondente vinculado com sucesso!");
+                            } else {
+                              const textMsgsWithoutAudio = activeChat.messages.filter(
+                                (m): m is TextMsg => m.type === "text" && !m.audioUrl
+                              );
+                              if (textMsgsWithoutAudio.length === 0) {
+                                alert("Todas as mensagens de texto já possuem áudio.");
+                                return;
+                              }
+                              // Candidate: same voice, or first without audio
+                              const candidate = textMsgsWithoutAudio.find(
+                                (m) => m.voiceName.toLowerCase() === g.voiceName.toLowerCase()
+                              ) || textMsgsWithoutAudio[0];
+                              
+                              const updated = activeChat.messages.map((m) =>
+                                m.id === candidate.id && m.type === "text"
+                                  ? { ...m, audioUrl: g.audioUrl }
+                                  : m
+                              );
+                              updateActiveChat({ messages: updated });
+                              alert(`Vinculado à linha: "${candidate.voiceName}: ${candidate.text}"`);
+                            }
+                          }}
+                        >
+                          {isLinked ? "Vinculado" : "Vincular ao Script"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-[10px] h-6 text-red-500 hover:text-red-700 px-2"
+                          onClick={() => {
+                            setGeneratedAudios((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
 
         {imageMessages.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
@@ -1782,6 +3139,98 @@ export default function ChatStoryGenerator() {
           </div>
         )}
 
+        {videoMessages.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Video className="h-4 w-4" /> Videos
+            </h2>
+            {videoMessages.map((m) => (
+              <div
+                key={m.id}
+                className="space-y-2 rounded-md border p-3"
+                tabIndex={0}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (const it of Array.from(items)) {
+                    if (it.type.startsWith("video/") || it.type.startsWith("image/gif")) {
+                      const file = it.getAsFile();
+                      if (file) {
+                        e.preventDefault();
+                        onUploadVideo(m.id, file);
+                        return;
+                      }
+                    }
+                  }
+                  const text = e.clipboardData?.getData("text");
+                  if (text && /^https?:\/\//i.test(text.trim())) {
+                    e.preventDefault();
+                    setVideoUrlFor(m.id, text.trim());
+                  }
+                }}
+              >
+                <div className="text-xs text-muted-foreground">
+                  Side {m.side} — “{m.text}”
+                </div>
+                <div className="flex gap-2 items-center">
+                  <Link2 className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Cole URL de vídeo ou GIF aqui (Ctrl/Cmd+V)"
+                    value={m.videoUrl?.startsWith("blob:") ? "" : m.videoUrl ?? ""}
+                    onChange={(e) => setVideoUrlFor(m.id, e.target.value || null)}
+                  />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    ref={(el) => {
+                      fileInputRefs.current[`${activeChatId}_${m.id}`] = el;
+                    }}
+                    type="file"
+                    accept="video/mp4,video/webm,image/gif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onUploadVideo(m.id, f);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
+                  >
+                    <Upload className="mr-2 h-3 w-3" /> Upload
+                  </Button>
+                  {m.videoUrl && (
+                    <>
+                      {m.videoType === "gif" ? (
+                        <img
+                          src={m.videoUrl}
+                          alt={m.text}
+                          className="h-12 w-12 object-cover rounded-md border"
+                        />
+                      ) : (
+                        <video
+                          src={m.videoUrl}
+                          className="h-12 w-12 object-cover rounded-md border"
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setVideoUrlFor(m.id, null)}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-2">
           <Button
             onClick={() => playAnimation()}
@@ -1792,25 +3241,6 @@ export default function ChatStoryGenerator() {
             <Play className="mr-2 h-4 w-4" />
             Play vídeo (todos os chats)
           </Button>
-          {(playing || recording) && (
-            <Button
-              onClick={togglePause}
-              variant="secondary"
-              size="lg"
-            >
-              {paused ? (
-                <>
-                  <Play className="mr-2 h-4 w-4" />
-                  Continuar
-                </>
-              ) : (
-                <>
-                  <Pause className="mr-2 h-4 w-4" />
-                  Pausar
-                </>
-              )}
-            </Button>
-          )}
         </div>
         </div>
 
@@ -1938,105 +3368,296 @@ export default function ChatStoryGenerator() {
           >
             <div
               ref={chatInnerRef}
-              className="w-full flex flex-col justify-start p-3 gap-1"
+              className="w-full flex flex-col justify-start pl-1.5 pr-2.5 py-3 gap-0"
               style={{
                 transform: `translateY(-${exportScroll + (recording ? 0 : previewDragOffset)}px)`,
               }}
             >
             <AnimatePresence>
               {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
+                if (recording && playing && idx < exportStartIndex) {
+                  const msgChatId = (m as any).chatId || displayChat.id;
+                  const chatMeas = exportMeasurements[msgChatId] || [];
+                  const meas = chatMeas[idx] || { height: 50, margin: 0 };
+                  return <div key={m.id} style={{ height: meas.height, marginBottom: meas.margin, flexShrink: 0 }} />;
+                }
+
                 const isLastSent =
                   m.side === "2" &&
                   !arr.slice(idx + 1).some((n) => n.side === "2");
                 const prev = arr[idx - 1];
-                const senderName = m.type === "text" ? (m.displayName || m.voiceName) : "";
-                const prevSenderName =
-                  prev?.type === "text" ? (prev.displayName || prev.voiceName) : "";
+                const getSenderName = (msg: Msg, index: number) => {
+                  let name = "";
+                  if (msg.type === "text") name = msg.displayName || msg.voiceName;
+                  else if (msg.type === "image" || msg.type === "video") name = msg.displayName || msg.voiceName || "";
+                  
+                  // Fallback for loaded projects without voiceName on media
+                  if (!name) {
+                    for (let i = index - 1; i >= 0; i--) {
+                      const p = arr[i];
+                      if (p.side === msg.side && p.type === "text") {
+                        return p.displayName || p.voiceName || "";
+                      }
+                    }
+                  }
+                  return name;
+                };
+                const senderName = getSenderName(m, idx);
+                const prevSenderName = prev ? getSenderName(prev, idx - 1) : "";
+
+                const isLeftSide = effectiveGroupChat ? (m.side !== "2") : (m.side === "1");
+
+                // Sequence checks for Group Chat (side "1")
+                const isFirstInSequence = (() => {
+                  if (!isLeftSide) return false;
+                  const pMsg = arr[idx - 1];
+                  if (!pMsg) return true; // First message overall
+                  
+                  const pMsgLeftSide = effectiveGroupChat ? (pMsg.side !== "2") : (pMsg.side === "1");
+                  if (!pMsgLeftSide) return true; // Previous message was from side 2
+                  
+                  const currentSender = getSenderName(m, idx);
+                  const prevSender = pMsg ? getSenderName(pMsg, idx - 1) : "";
+                  return currentSender !== prevSender;
+                })();
+
+                const isLastInSequence = (() => {
+                  if (!isLeftSide) return false;
+                  const next = arr[idx + 1];
+                  if (!next) return true; // Last message overall
+                  
+                  const nextLeftSide = effectiveGroupChat ? (next.side !== "2") : (next.side === "1");
+                  if (!nextLeftSide) return true; // Next message is on side 2
+                  
+                  const currentSender = getSenderName(m, idx);
+                  const nextSender = next ? getSenderName(next, idx + 1) : "";
+                  return currentSender !== nextSender;
+                })();
+
+                const isLastInSequenceRight = (() => {
+                  if (m.side !== "2") return false;
+                  const next = arr[idx + 1];
+                  if (!next) return true;
+                  return next.side !== "2";
+                })();
+
                 const showName =
                   effectiveGroupChat &&
-                  m.side === "1" &&
-                  m.type === "text" &&
-                  !!m.displayName;
+                  isLeftSide &&
+                  isFirstInSequence;
+
                 const nameColor =
-                  m.type === "text" && m.displayName
-                    ? displayChat.nameColors?.[m.displayName] || ""
+                  senderName
+                    ? displayChat.nameColors?.[senderName] || ""
                     : "";
+
+                const showAvatarPlaceholder = effectiveGroupChat && isLeftSide;
+                const avatarUrl = showAvatarPlaceholder && senderName ? (displayChat.characterPhotos?.[senderName] || "") : "";
+                const charInitial = senderName ? senderName.charAt(0).toUpperCase() : "";
+
+                const showAvatar = isLastInSequence && effectiveGroupChat;
+
+                const isEndOfBlock = (() => {
+                  const next = arr[idx + 1];
+                  if (!next) return true; // Last message overall
+                  if (next.side !== m.side) return true; // Switches sides (left/right)
+                  
+                  // Same side. If it's the left side, check if the sender name changed.
+                  if (isLeftSide) {
+                    const currentSender = getSenderName(m, idx);
+                    const nextSender = next ? getSenderName(next, idx + 1) : "";
+                    return currentSender !== nextSender;
+                  }
+                  return false;
+                })();
+
+                const spacingClass = isEndOfBlock ? "mb-3.5" : "mb-0.5";
+
+                const renderBubble = () => {
+                  if (m.type === "text") {
+                    if (isWA) {
+                      const bubbleSideClass = m.side === "2"
+                        ? `bg-[#005c4b] ml-auto ${isLastInSequenceRight ? "rounded-lg rounded-tr-none wa-tail-right" : "rounded-lg"}`
+                        : `bg-[#262d31] ${isLastInSequence ? "rounded-lg rounded-tl-none wa-tail-left" : "rounded-lg"}`;
+                      return (
+                        <div className={`relative max-w-[80%] py-1.5 px-2.5 text-white text-[15px] leading-snug shadow-sm ${bubbleSideClass}`}>
+                          {showName && (
+                            <span
+                              className="text-[13px] font-bold mb-0.5 capitalize block"
+                              style={{ color: nameColor || "#53bdeb" }}
+                            >
+                              {senderName}
+                            </span>
+                          )}
+                          {renderCensored(m.text)}
+                        </div>
+                      );
+                    } else {
+                      const bubbleSideClass = m.side === "2"
+                        ? `bg-[#0A84FF] rounded-2xl ${isLastInSequenceRight ? "im-tail-right" : ""}`
+                        : `bg-[#262628] rounded-2xl ${isLastInSequence ? "im-tail-left" : ""}`;
+                      return (
+                        <div className={`relative max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${bubbleSideClass}`}>
+                          {renderCensored(m.text)}
+                        </div>
+                      );
+                    }
+
+
+                  } else if (m.type === "image") {
+                    if (m.imageUrl) {
+                      if (isWA) {
+                        return (
+                          <div
+                            className={`p-1 rounded-lg ${
+                              m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
+                            }`}
+                          >
+                            {showName && (
+                              <span
+                                className="text-[13px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                style={{ color: nameColor || "#53bdeb" }}
+                              >
+                                {senderName}
+                              </span>
+                            )}
+                            <img
+                              src={m.imageUrl}
+                              alt={m.text}
+                              className="max-w-[240px] max-h-56 object-cover rounded-md"
+                            />
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <img
+                            src={m.imageUrl}
+                            alt={m.text}
+                            className="max-w-[70%] max-h-56 object-cover rounded-2xl"
+                          />
+                        );
+                      }
+                    } else {
+                      return (
+                        <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
+                          isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
+                        }`}>
+                          <ImageIcon className="h-8 w-8" />
+                          <span className="text-center">{m.text}</span>
+                        </div>
+                      );
+                    }
+                  } else if (m.type === "video") {
+                    if (m.videoUrl) {
+                      const isGif = m.videoType === "gif";
+                      if (isWA) {
+                        return (
+                          <div
+                            className={`p-1 rounded-lg ${
+                              m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
+                            }`}
+                          >
+                            {showName && (
+                              <span
+                                className="text-[13px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                style={{ color: nameColor || "#53bdeb" }}
+                              >
+                                {senderName}
+                              </span>
+                            )}
+                            {isGif ? (
+                              <img
+                                src={m.videoUrl}
+                                alt={m.text}
+                                className="max-w-[240px] max-h-[180px] object-cover rounded-md"
+                              />
+                            ) : (
+                              <VideoBubble
+                                src={m.videoUrl}
+                                recording={recording}
+                                className="max-w-[240px] max-h-[180px] object-cover rounded-md"
+                                msgId={m.id}
+                                chatId={displayChat.id}
+                              />
+                            )}
+                          </div>
+                        );
+                      } else {
+                        return isGif ? (
+                          <img
+                            src={m.videoUrl}
+                            alt={m.text}
+                            className="max-w-[240px] max-h-[180px] object-cover rounded-2xl"
+                          />
+                        ) : (
+                          <VideoBubble
+                            src={m.videoUrl}
+                            recording={recording}
+                            className="max-w-[240px] max-h-[180px] object-cover rounded-2xl"
+                            msgId={m.id}
+                            chatId={displayChat.id}
+                          />
+                        );
+                      }
+                    } else {
+                      return (
+                        <div className={`w-[240px] h-[180px] rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
+                          isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
+                        }`}>
+                          <Video className="h-8 w-8" />
+                          <span className="text-center truncate max-w-full px-2">{m.text}</span>
+                        </div>
+                      );
+                    }
+                  }
+                };
+
                 return (
                 <motion.div
                   key={m.id}
                   initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: recording ? 0 : 0.3 }}
-                  className={`flex flex-col ${isWA ? "mb-1.5" : "mb-1"} ${
+                  className={`flex flex-col ${spacingClass} ${
                     m.side === "2" ? "items-end" : "items-start"
-                  }`}
+                  } ${!effectiveGroupChat && m.side === "1" ? "pl-2" : ""}`}
                 >
+
                   {!isWA && showName && (
                     <span
-                      className="text-[11px] mb-0.5 ml-3 capitalize block"
-                      style={{ color: nameColor || "#8e8e93" }}
+                      className="text-[11px] mb-0.5 capitalize block"
+                      style={{
+                        color: nameColor || "#8e8e93",
+                        marginLeft: showAvatarPlaceholder ? "36px" : "12px",
+                      }}
                     >
                       {senderName}
                     </span>
                   )}
-                  {m.type === "text" ? (
-                    isWA ? (
-                      <div
-                        className={`relative max-w-[80%] py-1.5 px-2.5 text-white text-[15px] leading-snug shadow-sm ${
-                          m.side === "2"
-                            ? "bg-[#005c4b] rounded-lg rounded-tr-none ml-auto wa-tail-right"
-                            : "bg-[#262d31] rounded-lg rounded-tl-none wa-tail-left"
-                        }`}
-                      >
-                        {showName && (
-                          <span
-                            className="text-[13px] font-bold mb-0.5 capitalize block"
-                            style={{ color: nameColor || "#53bdeb" }}
-                          >
-                            {senderName}
-                          </span>
+                  {showAvatarPlaceholder ? (
+                    <div className="flex flex-row items-end gap-1 w-full">
+                      <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center select-none relative z-10">
+
+                        {showAvatar && (
+                          avatarUrl ? (
+                            <img
+                              src={avatarUrl}
+                              alt={senderName}
+                              className="w-7 h-7 rounded-full object-cover border border-zinc-700/50"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-[10px] font-semibold uppercase border border-zinc-700/50">
+                              {charInitial}
+                            </div>
+                          )
                         )}
-                        {renderCensored(m.text)}
                       </div>
-                    ) : (
-                      <div
-                        className={`relative max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${
-                          m.side === "2"
-                            ? "bg-[#0A84FF] rounded-2xl im-tail-right"
-                            : "bg-[#262628] rounded-2xl"
-                        }`}
-                      >
-                        {renderCensored(m.text)}
-                      </div>
-                    )
-                  ) : m.imageUrl ? (
-                    isWA ? (
-                      <div
-                        className={`p-1 rounded-lg ${
-                          m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
-                        }`}
-                      >
-                        <img
-                          src={m.imageUrl}
-                          alt={m.text}
-                          className="max-w-[240px] max-h-56 object-cover rounded-md"
-                        />
-                      </div>
-                    ) : (
-                      <img
-                        src={m.imageUrl}
-                        alt={m.text}
-                        className="max-w-[70%] max-h-56 object-cover rounded-2xl"
-                      />
-                    )
-                  ) : (
-                    <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
-                      isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
-                    }`}>
-                      <ImageIcon className="h-8 w-8" />
-                      <span className="text-center">{m.text}</span>
+                      {renderBubble()}
                     </div>
+                  ) : (
+                    renderBubble()
                   )}
+
                 </motion.div>
               );})}
             </AnimatePresence>
@@ -2127,25 +3748,123 @@ export default function ChatStoryGenerator() {
             </div>
           )}
           </div>
-          <Button
-            onClick={exportVideoFast}
-            disabled={!allAudiosReady || playing || recording}
-            size="lg"
-            style={{ width: 400 }}
-            variant="secondary"
-          >
-            {recording ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Rendering... {Math.round(exportProgress)}%
-              </>
-            ) : (
-              <>
-                <Upload className="mr-2 h-4 w-4 rotate-180" />
-                Export Video
-              </>
-            )}
-          </Button>
+          {/* YouTube-style Control Bar */}
+          {playing && !recording && (
+            <div
+              style={{ width: 400 }}
+              className="rounded-xl bg-black/80 backdrop-blur-md border border-white/10 px-4 py-3 flex flex-col gap-2"
+            >
+              {/* Progress Bar */}
+              <div
+                className="group relative w-full h-2 bg-white/15 rounded-full cursor-pointer hover:h-3 transition-all"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                  const target = Math.round(pct * totalMsgCount);
+                  seekTo(target);
+                }}
+              >
+                <div
+                  className="absolute inset-y-0 left-0 bg-red-500 rounded-full transition-all"
+                  style={{ width: `${totalMsgCount > 0 ? (currentMsgIndex / totalMsgCount) * 100 : 0}%` }}
+                />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-red-500 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ left: `calc(${totalMsgCount > 0 ? (currentMsgIndex / totalMsgCount) * 100 : 0}% - 7px)` }}
+                />
+              </div>
+
+              {/* Controls Row */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                  {/* Skip Back */}
+                  <button
+                    onClick={skipBackward}
+                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
+                    title="Voltar 5 mensagens"
+                  >
+                    <SkipBack className="h-4 w-4" />
+                  </button>
+
+                  {/* Play/Pause */}
+                  <button
+                    onClick={togglePause}
+                    className="p-2 rounded-full hover:bg-white/15 text-white hover:text-white transition-colors"
+                    title={paused ? "Continuar" : "Pausar"}
+                  >
+                    {paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                  </button>
+
+                  {/* Skip Forward */}
+                  <button
+                    onClick={skipForward}
+                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
+                    title="Avançar 5 mensagens"
+                  >
+                    <SkipForward className="h-4 w-4" />
+                  </button>
+
+                  {/* Stop */}
+                  <button
+                    onClick={stopPlayback}
+                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
+                    title="Parar"
+                  >
+                    <Square className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Time & Progress Info */}
+                <div className="flex items-center gap-3 text-xs text-white/70 font-mono">
+                  <span>{formatTime(playbackElapsed)}</span>
+                  <span className="text-white/40">•</span>
+                  <span>{currentMsgIndex}/{totalMsgCount} msgs</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3" style={{ width: 400 }}>
+            <Button
+              onClick={() => exportVideoFast(false)}
+              disabled={!allAudiosReady || playing || recording}
+              size="lg"
+              className="w-full"
+              variant="secondary"
+            >
+              {recording ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rendering... {Math.round(exportProgress)}%
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4 rotate-180" />
+                  Exportar Vídeo (Chat Ativo)
+                </>
+              )}
+            </Button>
+
+            <Button
+              onClick={() => exportVideoFast(true)}
+              disabled={!allAudiosReady || playing || recording}
+              size="lg"
+              className="w-full"
+              variant="outline"
+            >
+              {recording ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rendering... {Math.round(exportProgress)}%
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4 rotate-180" />
+                  Exportar Vídeo (Todos os Chats)
+                </>
+              )}
+            </Button>
+          </div>
         </div>
         </div>
       </TabsContent>
