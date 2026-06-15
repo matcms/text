@@ -145,6 +145,12 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  Settings,
+  Cpu,
+  FileText,
+  Download,
+  Menu,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -152,7 +158,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, Sparkles, Wand2 } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import {
   saveProject,
@@ -185,6 +191,7 @@ type TextMsg = {
   displayName?: string;
   text: string;
   spokenText?: string;
+  instruct?: string;
   audioUrl: string | null;
 };
 type ImgMsg = {
@@ -220,6 +227,10 @@ type Chat = {
   isGroupChat?: boolean;
   groupSubtitle?: string;
   nameColors?: Record<string, string>;
+  characterPhotos?: Record<string, string>;
+  characterAudios?: Record<string, string>;
+  aiPrompt?: string;
+  aiChapterInstruction?: string;
 };
 
 const NAME_COLOR_OPTIONS: { label: string; value: string }[] = [
@@ -256,6 +267,9 @@ const newChat = (i: number): Chat => ({
   groupSubtitle: "tap here for group info",
   nameColors: {},
   characterPhotos: {},
+  characterAudios: {},
+  aiPrompt: "",
+  aiChapterInstruction: "",
 });
 
 // Convert base64 (mp3) to blob URL
@@ -286,10 +300,34 @@ const startOmniVoiceServerFn = createServerFn({ method: "POST" })
 
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
-  const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "omnivoice">("elevenlabs");
+  const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "omnivoice" | "qwen3">("elevenlabs");
   const [omniVoiceUrl, setOmniVoiceUrl] = useState("http://localhost:8000");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  
+  // AI Speech Emotion Director States
+  const [useDirector, setUseDirector] = useState(false);
+  const [directorLlmProvider, setDirectorLlmProvider] = useState<"gemini" | "openai" | "local">("gemini");
+  const [localLlmUrl, setLocalLlmUrl] = useState("http://localhost:11434/v1");
+  const [localLlmModel, setLocalLlmModel] = useState("gemma2");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
+  const [isDirecting, setIsDirecting] = useState(false);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeInstructions, setYoutubeInstructions] = useState("");
+  const [visualAnalysis, setVisualAnalysis] = useState(false);
+
+  // Formatting States
+  const [rawScriptInput, setRawScriptInput] = useState("");
+  const [formatterInstructions, setFormatterInstructions] = useState("");
+  const [formattedScriptOutput, setFormattedScriptOutput] = useState("");
+  const [isFormatting, setIsFormatting] = useState(false);
+
+  // OmniVoice advanced tuning parameters
+  const [omniNumStep, setOmniNumStep] = useState(32);
+  const [omniGuidanceScale, setOmniGuidanceScale] = useState(2.0);
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
@@ -323,6 +361,10 @@ export default function ChatStoryGenerator() {
   const [savedVoices, setSavedVoices] = useState<SavedVoice[]>([]);
   const [newVoiceName, setNewVoiceName] = useState("");
   const [newVoiceId, setNewVoiceId] = useState("");
+  const [designGender, setDesignGender] = useState("female");
+  const [designAge, setDesignAge] = useState("young adult");
+  const [designPitch, setDesignPitch] = useState("moderate pitch");
+  const [designAccent, setDesignAccent] = useState("portuguese accent");
 
   useEffect(() => {
     try {
@@ -336,8 +378,16 @@ export default function ChatStoryGenerator() {
 
   const addSavedVoice = () => {
     const n = newVoiceName.trim();
-    const v = newVoiceId.trim();
-    if (!n || !v) return;
+    if (!n) return;
+    
+    let v = "";
+    if (ttsProvider === "omnivoice" || ttsProvider === "qwen3") {
+      v = [designGender, designAge, designPitch, designAccent].filter(Boolean).join(", ");
+    } else {
+      v = newVoiceId.trim();
+    }
+    
+    if (!v) return;
     setSavedVoices((p) => [...p.filter((x) => x.name !== n), { name: n, voiceId: v }]);
     setNewVoiceName("");
     setNewVoiceId("");
@@ -372,6 +422,9 @@ export default function ChatStoryGenerator() {
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
+  const [activeSection, setActiveSection] = useState<"project" | "script" | "formatter" | "characters" | "media" | "generation" | "export" | "settings">("project");
+  const [generatingCharacter, setGeneratingCharacter] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<StoredProject[]>([]);
   const [savingProject, setSavingProject] = useState(false);
   const [generatedAudios, setGeneratedAudios] = useState<{
@@ -508,6 +561,8 @@ export default function ChatStoryGenerator() {
           messages,
           voiceMap: c.voiceMap,
           characterPhotos: c.characterPhotos || {},
+          aiPrompt: c.aiPrompt || "",
+          aiChapterInstruction: c.aiChapterInstruction || "",
         });
       }
       const audioLibrary = [];
@@ -550,6 +605,8 @@ export default function ChatStoryGenerator() {
       script: c.script,
       voiceMap: c.voiceMap,
       characterPhotos: c.characterPhotos || {},
+      aiPrompt: c.aiPrompt || "",
+      aiChapterInstruction: c.aiChapterInstruction || "",
       messages: c.messages.map((m) => {
         if (m.type === "text") {
           return {
@@ -622,6 +679,7 @@ export default function ChatStoryGenerator() {
 
     setVisibleMessages([]);
     setActiveTab("editor");
+    setActiveSection("project");
   };
 
   const handleDeleteProject = async (id: string) => {
@@ -633,8 +691,17 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     setElevenKey(localStorage.getItem("elevenlabs_api_key") || "");
     setChatTheme((localStorage.getItem("chat_theme") as ChatTheme) || "imessage");
-    setTtsProvider((localStorage.getItem("tts_provider") as "elevenlabs" | "omnivoice") || "elevenlabs");
+    setTtsProvider((localStorage.getItem("tts_provider") as "elevenlabs" | "omnivoice" | "qwen3") || "elevenlabs");
     setOmniVoiceUrl(localStorage.getItem("omnivoice_url") || "http://localhost:8000");
+    setUseDirector(localStorage.getItem("use_director") === "true");
+    setDirectorLlmProvider((localStorage.getItem("director_llm_provider") as "gemini" | "openai" | "local") || "gemini");
+    setLocalLlmUrl(localStorage.getItem("local_llm_url") || "http://localhost:11434/v1");
+    setLocalLlmModel(localStorage.getItem("local_llm_model") || "gemma2");
+    setGeminiApiKey(localStorage.getItem("gemini_api_key") || "");
+    setOpenaiApiKey(localStorage.getItem("openai_api_key") || "");
+    setOpenaiModel(localStorage.getItem("openai_model") || "gpt-4o-mini");
+    setOmniNumStep(Number(localStorage.getItem("omni_num_step")) || 32);
+    setOmniGuidanceScale(Number(localStorage.getItem("omni_guidance_scale")) || 2.0);
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -648,6 +715,33 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("omnivoice_url", omniVoiceUrl);
   }, [omniVoiceUrl]);
+  useEffect(() => {
+    localStorage.setItem("use_director", String(useDirector));
+  }, [useDirector]);
+  useEffect(() => {
+    localStorage.setItem("director_llm_provider", directorLlmProvider);
+  }, [directorLlmProvider]);
+  useEffect(() => {
+    localStorage.setItem("local_llm_url", localLlmUrl);
+  }, [localLlmUrl]);
+  useEffect(() => {
+    localStorage.setItem("local_llm_model", localLlmModel);
+  }, [localLlmModel]);
+  useEffect(() => {
+    localStorage.setItem("gemini_api_key", geminiApiKey);
+  }, [geminiApiKey]);
+  useEffect(() => {
+    localStorage.setItem("openai_api_key", openaiApiKey);
+  }, [openaiApiKey]);
+  useEffect(() => {
+    localStorage.setItem("openai_model", openaiModel);
+  }, [openaiModel]);
+  useEffect(() => {
+    localStorage.setItem("omni_num_step", String(omniNumStep));
+  }, [omniNumStep]);
+  useEffect(() => {
+    localStorage.setItem("omni_guidance_scale", String(omniGuidanceScale));
+  }, [omniGuidanceScale]);
 
   const updateActiveChat = (patch: Partial<Chat>) => {
     setChats((prev) => prev.map((c) => (c.id === activeChatId ? { ...c, ...patch } : c)));
@@ -686,8 +780,9 @@ export default function ChatStoryGenerator() {
     return texts.length > 0 && texts.every((m) => !!m.audioUrl);
   }, [chats]);
 
-  const parseScript = () => {
-    const lines = activeChat.script.split("\n").map((l) => l.trim()).filter(Boolean);
+  const parseScript = (scriptOverride?: string) => {
+    const scriptToParse = scriptOverride !== undefined ? scriptOverride : activeChat.script;
+    const lines = scriptToParse.split("\n").map((l) => l.trim()).filter(Boolean);
 
     type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null; headerLine?: string };
     const segs: Seg[] = [];
@@ -1034,10 +1129,34 @@ export default function ChatStoryGenerator() {
     chatId: string,
     localMessagesMap?: Record<string, Msg[]>
   ): Promise<Blob | null> => {
+    // 0. Check if there is a custom reference audio uploaded for this character
+    const targetChat = chats.find((c) => c.id === chatId);
+    const customAudioB64 = targetChat?.characterAudios?.[voiceName];
+    if (customAudioB64) {
+      try {
+        let mime = "audio/mpeg";
+        let pureB64 = customAudioB64;
+        if (customAudioB64.startsWith("data:")) {
+          const match = customAudioB64.match(/^data:(.*?);base64,/);
+          if (match) {
+            mime = match[1];
+            pureB64 = customAudioB64.slice(match[0].length);
+          }
+        }
+        const bin = atob(pureB64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        console.log(`[findReferenceAudio] Retornando áudio customizado carregado para o personagem ${voiceName}`);
+        return new Blob([bytes], { type: mime });
+      } catch (err) {
+        console.error("Erro ao converter áudio de referência customizado:", err);
+      }
+    }
+
     // 1. Search in the active/current chat messages
     const currentChatMessages = localMessagesMap
       ? localMessagesMap[chatId]
-      : chats.find((c) => c.id === chatId)?.messages;
+      : targetChat?.messages;
 
     if (currentChatMessages) {
       for (const msg of currentChatMessages) {
@@ -1109,51 +1228,674 @@ export default function ChatStoryGenerator() {
     return null;
   };
 
+  const directSpeechWithAI = async () => {
+    const textMsgs = activeChat.messages.filter(
+      (m): m is TextMsg => m.type === "text"
+    );
+    if (textMsgs.length === 0) {
+      alert("Não há mensagens de texto para analisar no chat ativo.");
+      return;
+    }
+
+    if (directorLlmProvider !== "local") {
+      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      if (!apiKey.trim()) {
+        alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações.`);
+        return;
+      }
+    }
+
+    setIsDirecting(true);
+    try {
+      const dialogueLines = textMsgs.map((m) => `ID: ${m.id} | ${m.voiceName}: ${m.text}`).join("\n");
+      
+      const promptText = `Aqui está o diálogo completo do chat. Analise as falas no contexto geral da conversa para determinar o tom de voz correto ("instruct") e os ajustes expressivos ("spokenText") para cada uma.
+Mantenha a consistência emocional entre as respostas.
+
+Diálogo do Chat:
+${dialogueLines}
+
+Retorne um array JSON contendo as decisões de direção de fala para cada ID de mensagem fornecido.
+O formato final de cada objeto do array DEVE ser exatamente:
+{
+  "id": número (correspondente ao ID da mensagem),
+  "spokenText": "texto original com pontuações expressivas ou tags [laughter]/[sigh] se necessário. Ex: 'Hum... [sigh] Não acredito...'",
+  "instruct": "tom de voz OmniVoice ('whisper', 'low pitch', 'very low pitch', 'moderate pitch', 'high pitch', 'very high pitch' ou '')"
+}`;
+
+      const systemPrompt = `Você é o Diretor de Expressão de Voz (Speech Emotion Director).
+Sua tarefa é analisar o diálogo de um chat e decidir como cada fala deve ser interpretada pelo motor de Text-to-Speech (TTS) OmniVoice.
+
+Para cada mensagem de texto, você deve:
+1. Definir o tom de voz (campo "instruct") usando APENAS um dos seguintes valores oficiais do OmniVoice:
+   - "whisper" (para sussurros, segredos, medo intenso)
+   - "low pitch" (para falas sérias, tristes, calmas, deprimidas)
+   - "very low pitch" (para vozes muito graves, ameaçadoras ou sombrias)
+   - "moderate pitch" (para diálogo normal, neutro)
+   - "high pitch" (para alegria, empolgação, surpresa, perguntas ou fala mais rápida)
+   - "very high pitch" (para gritos, raiva extrema, desespero ou grande agitação)
+   - "" (vazio, para deixar o padrão do clone de voz)
+
+2. Ajustar o texto falado (campo "spokenText") para expressar melhor a emoção através de pontuação e tags não-verbais. O OmniVoice suporta as tags "[laughter]" (risada) e "[sigh]" (suspiro) inseridas no texto.
+   Dicas para "spokenText":
+   - Use reticências "..." para indicar hesitação, pausas dramáticas ou tristeza.
+   - Use exclamações triplas "!!!" e letras maiúsculas para palavras gritadas ou com muita ênfase (ex: "NÃO faça isso!!!").
+   - Adicione "[laughter]" para risadas curtas ou falas achando graça (ex: "[laughter] Sério mesmo?").
+   - Adicione "[sigh]" para demonstrar desânimo, cansaço ou alívio (ex: "[sigh] Que bom que acabou.").
+   - NÃO altere o significado ou as palavras da mensagem principal; faça apenas ajustes expressivos de formatação, pontuação e inclusão de tags.
+
+Analise o fluxo do chat para garantir consistência no diálogo (se um personagem está irritado em uma fala, a resposta do outro ou a fala seguinte deve refletir esse contexto).`;
+
+      let parsedResults: Array<{ id: number; spokenText: string; instruct: string }> = [];
+
+      if (directorLlmProvider === "gemini") {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: promptText }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    id: { type: "INTEGER" },
+                    spokenText: { type: "STRING" },
+                    instruct: { type: "STRING" }
+                  },
+                  required: ["id", "spokenText", "instruct"]
+                }
+              }
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Gemini: ${errText}`);
+        }
+
+        const data = await response.json();
+        const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!jsonText) throw new Error("A API do Gemini retornou uma resposta sem texto.");
+        parsedResults = JSON.parse(jsonText);
+      } else if (directorLlmProvider === "openai") {
+        const url = "https://api.openai.com/v1/chat/completions";
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: openaiModel || "gpt-4o-mini",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: promptText }
+            ],
+            response_format: { type: "json_object" }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API OpenAI: ${errText}`);
+        }
+
+        const data = await response.json();
+        const jsonText = data.choices?.[0]?.message?.content;
+        if (!jsonText) throw new Error("A API da OpenAI retornou uma resposta sem conteúdo.");
+        const rawJson = JSON.parse(jsonText);
+        parsedResults = Array.isArray(rawJson) 
+          ? rawJson 
+          : (rawJson.emotions || rawJson.results || rawJson.dialogue || Object.values(rawJson)[0] as any);
+      } else {
+        // Local LLM
+        const baseUrl = localLlmUrl.replace(/\/$/, "");
+        const url = `${baseUrl}/chat/completions`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer local-key-not-needed"
+          },
+          body: JSON.stringify({
+            model: localLlmModel || "local-model",
+            messages: [
+              { role: "user", content: `${systemPrompt}\n\n${promptText}` }
+            ],
+            response_format: { type: "json_object" }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Local: ${errText}`);
+        }
+
+        const data = await response.json();
+        const jsonText = data.choices?.[0]?.message?.content;
+        if (!jsonText) throw new Error("O modelo local retornou uma resposta sem conteúdo.");
+        const rawJson = JSON.parse(jsonText);
+        parsedResults = Array.isArray(rawJson) 
+          ? rawJson 
+          : (rawJson.emotions || rawJson.results || rawJson.dialogue || Object.values(rawJson)[0] as any);
+      }
+
+      if (!Array.isArray(parsedResults)) {
+        throw new Error("A resposta da IA não pôde ser interpretada como uma lista de emoções.");
+      }
+
+      const updatedMessages = activeChat.messages.map((msg) => {
+        if (msg.type !== "text") return msg;
+        const aiMatch = parsedResults.find((r) => r.id === msg.id);
+        if (aiMatch) {
+          return {
+            ...msg,
+            spokenText: aiMatch.spokenText || undefined,
+            instruct: aiMatch.instruct || undefined,
+          };
+        }
+        return msg;
+      });
+
+      updateActiveChat({ messages: updatedMessages });
+      toast.success("Direção de voz concluída com sucesso! Emoções aplicadas ao chat.");
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao dirigir falas: ${(e as Error).message}`);
+    } finally {
+      setIsDirecting(false);
+    }
+  };
+
+  const generateScriptWithAI = async (isContinuation: boolean) => {
+    if (directorLlmProvider !== "local") {
+      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      if (!apiKey.trim()) {
+        alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações avançadas.`);
+        return;
+      }
+    }
+
+    setIsGeneratingScript(true);
+    try {
+      // Gather context from all chats in the project
+      const otherChatsContext = chats
+        .filter((c) => c.id !== activeChatId)
+        .map((c) => {
+          const lines = c.script.split("\n").filter(Boolean);
+          const previewLines = lines.slice(-20).join("\n"); // last 20 lines
+          return `Chat "${c.contactName}":\n${previewLines}`;
+        })
+        .join("\n\n");
+
+      const currentChatHistory = activeChat.script || "";
+
+      let userPrompt = "";
+      if (!isContinuation) {
+        if (!activeChat.aiPrompt?.trim()) {
+          alert("Por favor, digite a premissa geral do roteiro.");
+          setIsGeneratingScript(false);
+          return;
+        }
+        userPrompt = `Crie um novo roteiro de chat story baseado na seguinte premissa geral:
+Premissa Geral: "${activeChat.aiPrompt}"
+
+Gere as primeiras 20 a 30 mensagens da história. Certifique-se de começar com o cabeçalho do tema.`;
+      } else {
+        userPrompt = `Continue o roteiro de chat story atual.
+Histórico das conversas em outras abas/chats do projeto (para contexto):
+${otherChatsContext || "Nenhum chat anterior."}
+
+Histórico atual deste chat (últimas mensagens):
+${currentChatHistory}
+
+Instrução/Direção para este novo capítulo/bloco de mensagens:
+"${activeChat.aiChapterInstruction || "Continue a história de forma natural e surpreendente"}"
+
+Gere as próximas 20 a 30 mensagens da história no mesmo formato textual, dando continuidade exata à última fala. NÃO repita nenhuma mensagem anterior do histórico. NÃO inclua nenhum cabeçalho de tema. Comece diretamente com a próxima fala.`;
+      }
+
+      const systemPrompt = `Você é um roteirista profissional e assistente de escrita para um gerador de Chat Stories em formato de vídeo (estilo conversa de WhatsApp/iMessage).
+Sua tarefa é escrever diálogos naturais, engajadores, com suspense ou humor, dependendo da premissa fornecida.
+
+O roteiro gerado DEVE seguir EXATAMENTE o seguinte formato textual:
+- Se for o início da conversa (primeiro capítulo), comece com o cabeçalho do tema na primeira linha:
+- iMessage: [Nome do Contato ou do Grupo]
+(Ou "- WhatsApp: [Nome]")
+
+- As falas seguintes devem ter a estrutura:
+[Lado]: [NomePersonagem]> [Mensagem]
+
+Onde [Lado] é:
+1 - Lado esquerdo (personagem remoto/outro participante)
+2 - Lado direito (personagem autor/dono do celular)
+
+Exemplo de formato válido:
+- iMessage: Lucas
+1: Lucas> Oi Amor, tudo bem?
+2: Ana> Oi! Tudo sim, e com você?
+1: Lucas> Estou ótimo. Onde você está?
+
+Dicas de formatação que você PODE usar:
+• Mídias:
+1: img: [descrição da imagem para aparecer na tela]
+2: gif: [descrição do gif animado]
+
+Exemplo com mídia:
+2: Ana> Olha o que eu achei na rua:
+2: img: um gatinho preto pequeno de olhos verdes
+1: Lucas> Meu Deus! Que fofo!
+
+Regras CRÍTICAS:
+1. Retorne APENAS o texto do roteiro no formato especificado. Não escreva nenhuma introdução, explicação ou consideração antes ou depois do roteiro.
+2. Certifique-se de que cada linha de diálogo comece exatamente com "1: " ou "2: " seguido pelo nome do personagem, caractere ">" e a mensagem.
+3. Se for uma continuação (capítulo seguinte), NÃO gere cabeçalhos (como "- iMessage: ..."), apenas as falas que continuam a história.
+4. Mantenha os nomes dos personagens exatamente iguais aos que já foram criados no histórico do chat.`;
+
+      let generatedText = "";
+
+      if (directorLlmProvider === "gemini") {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Gemini: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!generatedText) throw new Error("A API do Gemini retornou uma resposta sem texto.");
+      } else if (directorLlmProvider === "openai") {
+        const url = "https://api.openai.com/v1/chat/completions";
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: openaiModel || "gpt-4o-mini",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API OpenAI: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.choices?.[0]?.message?.content;
+        if (!generatedText) throw new Error("A API da OpenAI retornou uma resposta sem conteúdo.");
+      } else {
+        // Local LLM
+        const baseUrl = localLlmUrl.replace(/\/$/, "");
+        const url = `${baseUrl}/chat/completions`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer local-key-not-needed"
+          },
+          body: JSON.stringify({
+            model: localLlmModel || "local-model",
+            messages: [
+              { role: "user", content: `${systemPrompt}\n\n${userPrompt}` }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Local: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.choices?.[0]?.message?.content;
+        if (!generatedText) throw new Error("O modelo local retornou uma resposta sem conteúdo.");
+      }
+
+      generatedText = generatedText.trim();
+
+      // Limpar blocos de markdown se a IA colocar
+      generatedText = generatedText.replace(/^```[a-zA-Z]*\n/g, "").replace(/\n```$/g, "").trim();
+
+      let newScript = "";
+      if (isContinuation) {
+        const currentScript = activeChat.script || "";
+        const endsWithNewline = currentScript.endsWith("\n");
+        newScript = currentScript + (endsWithNewline ? "" : "\n") + "\n" + generatedText;
+        updateActiveChat({
+          script: newScript,
+          aiChapterInstruction: ""
+        });
+        toast.success("Próximo capítulo gerado e adicionado ao roteiro!");
+      } else {
+        newScript = generatedText;
+        updateActiveChat({
+          script: newScript
+        });
+        toast.success("Roteiro inicial gerado com sucesso!");
+      }
+
+      parseScript(newScript);
+
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao gerar roteiro por IA: ${(e as Error).message}`);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
+
+  const generateScriptFromYouTube = async () => {
+    if (!youtubeUrl.trim()) {
+      alert("Por favor, digite o link do vídeo do YouTube.");
+      return;
+    }
+
+    if (directorLlmProvider !== "local") {
+      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      if (!apiKey.trim()) {
+        alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações avançadas.`);
+        return;
+      }
+    }
+
+    if (visualAnalysis && directorLlmProvider !== "gemini") {
+      alert("A Análise Visual (IA assistindo ao vídeo) requer o provedor Gemini. Por favor, mude o provedor nas configurações avançadas ou desmarque a Análise Visual.");
+      return;
+    }
+
+    setIsGeneratingScript(true);
+    try {
+      const baseUrl = omniVoiceUrl || "http://localhost:8000";
+      
+      const response = await fetch(`${baseUrl}/analyze-video`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          video_url: youtubeUrl,
+          gemini_api_key: geminiApiKey,
+          openai_api_key: openaiApiKey,
+          provider: directorLlmProvider,
+          visual_analysis: visualAnalysis,
+          prompt: youtubeInstructions || activeChat.aiPrompt || "",
+          local_llm_url: localLlmUrl,
+          local_llm_model: localLlmModel,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro do servidor local: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.script) {
+        throw new Error("O servidor não retornou nenhuma fala de chat.");
+      }
+
+      const newScript = data.script.trim();
+      updateActiveChat({
+        script: newScript,
+      });
+
+      toast.success("Roteiro do YouTube gerado com sucesso!");
+      parseScript(newScript);
+      
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao importar do YouTube: ${(e as Error).message}`);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
+
+  const formatScriptWithAI = async () => {
+    if (!rawScriptInput.trim()) {
+      alert("Por favor, cole o roteiro original que deseja formatar.");
+      return;
+    }
+
+    if (directorLlmProvider !== "local") {
+      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      if (!apiKey.trim()) {
+        alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações avançadas.`);
+        return;
+      }
+    }
+
+    setIsFormatting(true);
+    try {
+      const systemPrompt = `Você é um especialista em formatação de diálogos de chat e roteiros.
+Sua tarefa é ler um roteiro fornecido pelo usuário (que pode estar em qualquer formato: texto corrido, roteiro teatral tradicional, diálogo de livro, transcrição de áudio, etc.) e convertê-lo/formatá-lo EXATAMENTE no formato exigido pelo nosso gerador de Chat Stories.
+
+O roteiro formatado resultante DEVE seguir EXATAMENTE o seguinte formato textual:
+- Comece com o cabeçalho do tema na primeira linha:
+- iMessage: [Nome do Contato ou do Grupo]
+(Ou "- WhatsApp: [Nome]")
+
+- As falas seguintes devem ter a estrutura:
+[Lado]: [NomePersonagem]> [Mensagem]
+
+Onde [Lado] é:
+1 - Lado esquerdo (personagem remoto/outro participante)
+2 - Lado direito (personagem autor/dono do celular)
+
+Exemplo de formato válido:
+- iMessage: Lucas
+1: Lucas> Oi Amor, tudo bem?
+2: Ana> Oi! Tudo sim, e com você?
+1: Lucas> Estou ótimo. Onde você está?
+
+Dicas de formatação que você PODE usar:
+• Mídias:
+1: img: [descrição da imagem para aparecer na tela]
+2: gif: [descrição do gif animado]
+
+Regras CRÍTICAS:
+1. Retorne APENAS o texto do roteiro formatado. Não escreva nenhuma introdução, explicação, notas ou consideração antes ou depois do roteiro.
+2. Certifique-se de que cada linha de diálogo comece exatamente com "1: " ou "2: " seguido pelo nome do personagem, caractere ">" e a mensagem.
+3. Classifique os lados coerentemente: mantenha o personagem principal (normalmente o autor do chat/dono do celular) sempre do lado direito ("2: ") e os interlocutores do lado esquerdo ("1: ").
+4. Se o usuário forneceu orientações adicionais de tradução ou modificações, siga-as à risca durante a formatação.
+5. Se o texto original contiver múltiplos chats ou cenas separados (como diferentes blocos de diálogo), certifique-se de colocar um cabeçalho "- iMessage: [NomeDoChat]" ou "- WhatsApp: [NomeDoChat]" para cada um deles no início de seu respectivo bloco, e separe cada bloco de chat com uma linha contendo "---".`;
+
+      let userPrompt = `Roteiro original a ser formatado:\n${rawScriptInput}\n\n`;
+      if (formatterInstructions.trim()) {
+        userPrompt += `Orientações adicionais do usuário:\n${formatterInstructions}\n\n`;
+      }
+      userPrompt += `Formate o roteiro seguindo estritamente as regras especificadas.`;
+
+      let generatedText = "";
+
+      if (directorLlmProvider === "gemini") {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Gemini: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!generatedText) throw new Error("A API do Gemini retornou uma resposta sem texto.");
+      } else if (directorLlmProvider === "openai") {
+        const url = "https://api.openai.com/v1/chat/completions";
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: openaiModel || "gpt-4o-mini",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API OpenAI: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.choices?.[0]?.message?.content;
+        if (!generatedText) throw new Error("A API da OpenAI retornou uma resposta sem conteúdo.");
+      } else {
+        // Local LLM
+        const baseUrl = localLlmUrl.replace(/\/$/, "");
+        const url = `${baseUrl}/chat/completions`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer local-key-not-needed"
+          },
+          body: JSON.stringify({
+            model: localLlmModel || "local-model",
+            messages: [
+              { role: "user", content: `${systemPrompt}\n\n${userPrompt}` }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Erro API Local: ${errText}`);
+        }
+
+        const data = await response.json();
+        generatedText = data.choices?.[0]?.message?.content;
+        if (!generatedText) throw new Error("O modelo local retornou uma resposta sem conteúdo.");
+      }
+
+      generatedText = generatedText.trim();
+      // Limpar blocos de markdown se a IA colocar
+      generatedText = generatedText.replace(/^```[a-zA-Z]*\n/g, "").replace(/\n```$/g, "").trim();
+
+      setFormattedScriptOutput(generatedText);
+      toast.success("Roteiro formatado com sucesso!");
+
+    } catch (e) {
+      console.error(e);
+      alert(`Falha ao formatar roteiro: ${(e as Error).message}`);
+    } finally {
+      setIsFormatting(false);
+    }
+  };
+
   const ttsOmniVoice = async (
     text: string,
     voiceName: string,
     chatId: string,
-    localMessagesMap?: Record<string, Msg[]>
+    localMessagesMap?: Record<string, Msg[]>,
+    instruct?: string,
+    speed?: number
   ): Promise<string> => {
     let refBlob = await findReferenceAudio(voiceName, chatId, localMessagesMap);
+    
+    // If no reference audio is found, check if we can run in Voice Design mode
     if (!refBlob) {
-      if (!elevenKey) {
-        throw new Error(
-          `Nenhum áudio de referência encontrado no histórico para "${voiceName}". Insira sua API Key do ElevenLabs nas configurações para gerar o primeiro áudio de referência automaticamente.`
-        );
-      }
+      // Find the mapped voice setting for this character
       const chat = chats.find((c) => c.id === chatId);
-      let voiceId = (chat?.voiceMap[voiceName] || "").trim();
-      if (!voiceId) {
+      let characterVoiceSetting = (chat?.voiceMap[voiceName] || "").trim();
+      if (!characterVoiceSetting) {
         const sv = savedVoices.find(
           (v) => v.name.toLowerCase() === voiceName.toLowerCase()
         );
-        if (sv) voiceId = sv.voiceId;
-      }
-      if (!voiceId) voiceId = voiceName.trim();
-      if (!voiceId) {
-        throw new Error(
-          `Nenhum Voice ID encontrado para "${voiceName}". Defina o Voice ID do personagem nas configurações para que a referência possa ser gerada via ElevenLabs.`
-        );
+        if (sv) characterVoiceSetting = sv.voiceId;
       }
 
-      toast.info(`Gerando primeiro áudio de "${voiceName}" via ElevenLabs para servir de referência local...`, {
-        duration: 5000,
-      });
+      // Check if we have an explicit instruct or a character voice setting to use for Voice Design
+      const voiceDesignInstruct = (instruct && instruct.trim()) ? instruct : characterVoiceSetting;
 
-      const elevenUrl = await ttsElevenLabs(stripCensors(text), voiceId);
-      return elevenUrl;
+      if (voiceDesignInstruct && voiceDesignInstruct.trim()) {
+        console.log(`[OmniVoice] Nenhum áudio de referência encontrado. Usando modo Voice Design com instrução: ${voiceDesignInstruct}`);
+        instruct = voiceDesignInstruct;
+      } else if (ttsProvider === "qwen3") {
+        console.log(`[Qwen3] Nenhum áudio de referência encontrado. Usando modo Voice Design padrão.`);
+        instruct = "";
+      } else {
+        if (!elevenKey) {
+          throw new Error(
+            `Nenhum áudio de referência encontrado no histórico para "${voiceName}". Insira sua API Key do ElevenLabs nas configurações ou digite uma instrução (Voice Design) para gerar o áudio.`
+          );
+        }
+        const chat = chats.find((c) => c.id === chatId);
+        let voiceId = (chat?.voiceMap[voiceName] || "").trim();
+        if (!voiceId) {
+          const sv = savedVoices.find(
+            (v) => v.name.toLowerCase() === voiceName.toLowerCase()
+          );
+          if (sv) voiceId = sv.voiceId;
+        }
+        if (!voiceId) voiceId = voiceName.trim();
+        if (!voiceId) {
+          throw new Error(
+            `Nenhum Voice ID encontrado para "${voiceName}". Defina o Voice ID do personagem nas configurações para que a referência possa ser gerada via ElevenLabs.`
+          );
+        }
+
+        toast.info(`Gerando primeiro áudio de "${voiceName}" via ElevenLabs para servir de referência local...`, {
+          duration: 5000,
+        });
+
+        const telegramUrl = await ttsElevenLabs(stripCensors(text), voiceId);
+        return telegramUrl;
+      }
     }
 
-    console.log("Enviando áudio de referência para OmniVoice:", {
-      voiceName,
-      size: refBlob.size,
-      type: refBlob.type
-    });
+    if (refBlob) {
+      console.log("Enviando áudio de referência para OmniVoice:", {
+        voiceName,
+        size: refBlob.size,
+        type: refBlob.type
+      });
+    }
 
     const formData = new FormData();
     formData.append("text", text);
-    formData.append("reference_audio", refBlob, "reference.mp3");
+    if (refBlob) {
+      formData.append("reference_audio", refBlob, "reference.mp3");
+    }
+    if (instruct) {
+      formData.append("instruct", instruct);
+    }
+    formData.append("speed", String(speed !== undefined ? speed : voiceSpeed));
+    formData.append("num_step", String(omniNumStep));
+    formData.append("guidance_scale", String(omniGuidanceScale));
+    formData.append("provider", ttsProvider);
 
     const res = await fetch(`${omniVoiceUrl}/tts`, {
       method: "POST",
@@ -1178,10 +1920,11 @@ export default function ChatStoryGenerator() {
   const generateSingleAudio = async (
     text: string,
     voiceIdentifier: string,
-    chatId: string
+    chatId: string,
+    instruct?: string
   ): Promise<string> => {
-    if (ttsProvider === "omnivoice") {
-      return ttsOmniVoice(text, voiceIdentifier, chatId);
+    if (ttsProvider === "omnivoice" || ttsProvider === "qwen3") {
+      return ttsOmniVoice(text, voiceIdentifier, chatId, undefined, instruct);
     }
 
     if (!elevenKey) throw new Error("API key do ElevenLabs ausente.");
@@ -1219,7 +1962,8 @@ export default function ChatStoryGenerator() {
       const url = await generateSingleAudio(
         msg.spokenText ?? msg.text,
         msg.voiceName,
-        activeChat.id
+        activeChat.id,
+        msg.instruct
       );
       updateTextMessage(msgId, { audioUrl: url });
       setGeneratedAudios((prev) => {
@@ -1283,24 +2027,28 @@ export default function ChatStoryGenerator() {
     let accumulatedAudios = [...generatedAudios];
 
     for (const { chatId, msg } of allTexts) {
+      setGeneratingCharacter(msg.voiceName);
       const chat = chats.find((c) => c.id === chatId)!;
       const voiceId = (chat.voiceMap[msg.voiceName] || "").trim();
       if (ttsProvider === "elevenlabs" && !voiceId) {
         alert(`Defina o Voice ID para "${msg.voiceName}" no chat "${chat.name}".`);
         setGenerating(false);
+        setGeneratingCharacter(null);
         return;
       }
       try {
         let audioUrl: string;
-        if (ttsProvider === "omnivoice") {
+        const textToGenerate = msg.spokenText ?? msg.text;
+        if (ttsProvider === "omnivoice" || ttsProvider === "qwen3") {
           audioUrl = await ttsOmniVoice(
-            stripCensors(msg.spokenText ?? msg.text),
+            stripCensors(textToGenerate),
             msg.voiceName,
             chatId,
-            chatMessagesMap
+            chatMessagesMap,
+            msg.instruct
           );
         } else {
-          audioUrl = await ttsElevenLabs(stripCensors(msg.spokenText ?? msg.text), voiceId);
+          audioUrl = await ttsElevenLabs(stripCensors(textToGenerate), voiceId);
         }
 
         const arr = chatMessagesMap[chatId];
@@ -1329,12 +2077,14 @@ export default function ChatStoryGenerator() {
         console.error(e);
         alert(`Falha ao gerar áudio para "${msg.voiceName}": ${msg.text}\n${(e as Error).message}`);
         setGenerating(false);
+        setGeneratingCharacter(null);
         return;
       }
       done++;
       setGenProgress({ done, total: allTexts.length });
     }
     setGenerating(false);
+    setGeneratingCharacter(null);
   };
 
   const waitWhilePaused = async () => {
@@ -2133,1630 +2883,2308 @@ export default function ChatStoryGenerator() {
   const effectiveGroupChat = displayChat.isGroupChat ?? isGroupChat;
 
   return (
-    <Tabs
-      value={activeTab}
-      onValueChange={(v) => setActiveTab(v as "editor" | "projects")}
-      className="min-h-screen"
-    >
-
-      <div className="border-b bg-background px-6 pt-4">
-        <TabsList>
-          <TabsTrigger value="editor">Editor</TabsTrigger>
-          <TabsTrigger value="projects">Meus Projetos ({projects.length})</TabsTrigger>
-        </TabsList>
-      </div>
-
-      <TabsContent value="editor" className="mt-0">
-        <div className="flex flex-col lg:flex-row">
-          {/* LEFT */}
-          <div className="w-full lg:w-1/2 overflow-y-auto bg-background p-8 space-y-6">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">Chat Story Generator</h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Cole um script com <code>1: NomeDaVoz&gt; texto</code>, gere os áudios e reproduza um vídeo sincronizado.
-              </p>
-            </div>
-
-            {/* Project name + save */}
-            <div className="space-y-2 rounded-lg border p-4">
-              <Label>Nome do projeto</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="Ex: Story do Nate"
-                />
-                <Button
-                  onClick={handleSaveProject}
-                  disabled={savingProject}
-                  variant="secondary"
-                >
-                  {savingProject ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4 mr-1" /> Salvar
-                    </>
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Salva script, áudios e imagens localmente (IndexedDB) para você não regerar áudios à toa.
-              </p>
-            </div>
-
-        {/* Theme + Provider */}
-        <div className="space-y-4 rounded-lg border p-4">
-          <div className="space-y-2">
-            <Label>Chat Theme</Label>
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                size="sm"
-                variant={chatTheme === "imessage" ? "default" : "outline"}
-                onClick={() => setChatTheme("imessage")}
-              >
-                iMessage
-              </Button>
-              <Button
-                size="sm"
-                variant={chatTheme === "whatsapp" ? "default" : "outline"}
-                onClick={() => setChatTheme("whatsapp")}
-              >
-                WhatsApp (Dark)
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Chat Mode</Label>
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                size="sm"
-                variant={!effectiveGroupChat ? "default" : "outline"}
-                onClick={() => {
-                  setIsGroupChat(false);
-                  updateActiveChat({ isGroupChat: false });
-                }}
-              >
-                Direct Message
-              </Button>
-              <Button
-                size="sm"
-                variant={effectiveGroupChat ? "default" : "outline"}
-                onClick={() => {
-                  setIsGroupChat(true);
-                  updateActiveChat({ isGroupChat: true });
-                }}
-              >
-                Group Chat
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Message Delay (ms)</Label>
-            <Input
-              type="number"
-              step={50}
-              value={messageDelay}
-              onChange={(e) => setMessageDelay(Number(e.target.value) || 0)}
-              placeholder="0"
-            />
-            <p className="text-xs text-muted-foreground">
-              Pausa entre mensagens (0 = sem pausa). Use valores negativos (ex.: -300) para
-              sobrepor o áudio à próxima mensagem.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Provedor de Voz (TTS)</Label>
-            <select
-              className="w-full h-9 rounded-md border border-input bg-transparent px-2 text-xs"
-              value={ttsProvider}
-              onChange={(e) => setTtsProvider(e.target.value as "elevenlabs" | "omnivoice")}
-            >
-              <option value="elevenlabs">ElevenLabs (Nuvem / Pago)</option>
-              <option value="omnivoice">OmniVoice Local (Gratuito / Open-source)</option>
-            </select>
-          </div>
-
-          {ttsProvider === "elevenlabs" ? (
-            <div className="space-y-2">
-              <Label>ElevenLabs API Key</Label>
-              <Input
-                type="password"
-                value={elevenKey}
-                onChange={(e) => setElevenKey(e.target.value)}
-                placeholder="sk_..."
-              />
-              <p className="text-xs text-muted-foreground">
-                No script use o <strong>voice_id</strong> da voz do ElevenLabs (ex.: <code>21m00Tcm4TlvDq8ikWAM</code>).
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Servidor OmniVoice Local</Label>
-              <Input
-                type="text"
-                value={omniVoiceUrl}
-                onChange={(e) => setOmniVoiceUrl(e.target.value)}
-                placeholder="http://localhost:8000"
-              />
-              <p className="text-xs text-muted-foreground">
-                O OmniVoice clonará automaticamente as vozes buscando áudios anteriores gerados no histórico do chat.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                onClick={async () => {
-                  try {
-                    const res = await startOmniVoiceServerFn();
-                    if ((res as any).success) {
-                      alert("Comando enviado! Uma nova janela do CMD deve se abrir em breve com o servidor OmniVoice.");
-                    } else {
-                      alert(`Erro ao abrir CMD: ${(res as any).error}`);
-                    }
-                  } catch (err) {
-                    alert(`Erro na requisição: ${(err as Error).message}`);
-                  }
-                }}
-              >
-                Abrir Terminal e Iniciar Servidor
-              </Button>
-            </div>
+    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100 font-sans select-none">
+      {/* 1. SIDEBAR LATERAL FIXA */}
+      <aside className={`bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0 transition-all duration-200 ${sidebarCollapsed ? "w-16" : "w-64"}`}>
+        <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+          {!sidebarCollapsed && (
+            <span className="font-bold tracking-wider text-xs bg-gradient-to-r from-purple-400 to-indigo-400 bg-clip-text text-transparent uppercase">
+              Story Generator
+            </span>
           )}
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Voice Speed</Label>
-              <span className="text-xs text-muted-foreground">{voiceSpeed.toFixed(2)}x</span>
-            </div>
-            <Input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.05}
-              value={voiceSpeed}
-              onChange={(e) => setVoiceSpeed(Number(e.target.value))}
-            />
-          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-zinc-400 hover:text-white"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
         </div>
-
-        {/* Video Background Manager */}
-        <div className="space-y-3 rounded-lg border p-4">
-          <Label>Video Background</Label>
-          <div className="flex flex-wrap gap-2">
-            {backgrounds.map((bg) => {
-              const isActive = activeBackground === bg.value;
-              const style: CSSProperties =
-                bg.type === "color"
-                  ? { backgroundColor: bg.value }
-                  : {
-                      backgroundImage: `url(${bg.value})`,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                    };
-              return (
-                <div key={bg.id} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setActiveBackground(bg.value)}
-                    className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all ${
-                      isActive
-                        ? "border-primary ring-2 ring-primary scale-110"
-                        : "border-border hover:border-foreground/40"
-                    }`}
-                    style={style}
-                    title={bg.type === "color" ? bg.value : "Custom image"}
-                  />
-                  {!bg.id.startsWith("default-") && (
-                    <button
-                      type="button"
-                      onClick={() => removeBackground(bg)}
-                      className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] leading-none"
-                      title="Remove"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={newColor}
-              onChange={(e) => setNewColor(e.target.value)}
-              className="w-10 h-9 rounded cursor-pointer border border-input bg-transparent"
-            />
-            <Button size="sm" variant="outline" onClick={addColorBackground}>
-              Add Color
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              ref={bgFileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) addImageBackground(f);
-                if (bgFileInputRef.current) bgFileInputRef.current.value = "";
-              }}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => bgFileInputRef.current?.click()}
-            >
-              <Upload className="w-4 h-4 mr-1" /> Upload Image
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Imagens são salvas localmente em Base64 (compatível com a exportação offline).
-          </p>
-        </div>
-
-        {/* Chat tabs */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {chats.map((c) => (
-            <div
-              key={c.id}
-              className={`flex items-center gap-1 rounded-md border px-2 py-1 text-sm ${
-                c.id === activeChatId ? "bg-primary text-primary-foreground" : "bg-background"
-              }`}
-            >
+        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+          {[
+            { id: "project", label: "Projeto", icon: FolderOpen },
+            { id: "script", label: "Script / Roteiro", icon: FileText },
+            { id: "formatter", label: "Formatador de Script", icon: Wand2 },
+            { id: "characters", label: "Personagens", icon: Users },
+            { id: "media", label: "Mídias (Imagens/Vídeo)", icon: ImageIcon },
+            { id: "generation", label: "Sintetizar Áudio", icon: Cpu },
+            { id: "export", label: "Exportar Vídeo", icon: Download },
+            { id: "settings", label: "Avançado", icon: Settings },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = activeSection === item.id;
+            return (
               <button
-                onClick={() => {
-                  setActiveChatId(c.id);
-                  setVisibleMessages([]);
-                }}
+                key={item.id}
+                onClick={() => setActiveSection(item.id as any)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  active
+                    ? "bg-purple-600 text-white shadow-md shadow-purple-600/20"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+                }`}
               >
-                {c.name}
+                <Icon className="h-4 w-4 shrink-0" />
+                {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
               </button>
-              {chats.length > 1 && (
-                <button
-                  className="opacity-70 hover:opacity-100"
-                  onClick={() => removeChat(c.id)}
-                  aria-label="Remove chat"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          ))}
-          <Button size="sm" variant="outline" onClick={addChat}>
-            <Plus className="h-3 w-3 mr-1" /> Add chat
-          </Button>
-        </div>
+            );
+          })}
+        </nav>
+      </aside>
 
-        {/* Chat name */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label>Chat label</Label>
-            <Input
-              value={activeChat.name}
-              onChange={(e) => updateActiveChat({ name: e.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Contact name</Label>
-            <Input
-              value={activeChat.contactName}
-              onChange={(e) => updateActiveChat({ contactName: e.target.value })}
-            />
-          </div>
-        </div>
-
-        {/* Contact photo */}
-        <div
-          className="space-y-2 rounded-lg border p-4"
-          tabIndex={0}
-          onPaste={(e) => {
-            const items = e.clipboardData?.items;
-            if (!items) return;
-            for (const it of Array.from(items)) {
-              if (it.type.startsWith("image/")) {
-                const file = it.getAsFile();
-                if (file) {
-                  e.preventDefault();
-                  onUploadContactPhoto(file);
-                  return;
-                }
-              }
-            }
-            const text = e.clipboardData?.getData("text");
-            if (text && /^https?:\/\//i.test(text.trim())) {
-              e.preventDefault();
-              updateActiveChat({ contactPhoto: text.trim() });
-            }
-          }}
-        >
-          <Label className="flex items-center gap-2">
-            <User className="h-4 w-4" /> Contact photo (opcional)
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Cole uma imagem (Ctrl/Cmd+V), uma URL, ou envie um arquivo.
-          </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            {activeChat.contactPhoto ? (
-              <img
-                src={activeChat.contactPhoto}
-                alt="contact"
-                className="h-12 w-12 rounded-full object-cover border"
-              />
-            ) : (
-              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white font-medium">
-                {activeChat.contactName.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onUploadContactPhoto(f);
-              }}
-            />
-            <Button size="sm" variant="outline" onClick={() => photoInputRef.current?.click()}>
-              <Upload className="mr-2 h-3 w-3" /> Upload
-            </Button>
-            <Button size="sm" variant="outline" onClick={pasteContactPhoto}>
-              <ClipboardPaste className="mr-2 h-3 w-3" /> Colar
-            </Button>
-            {activeChat.contactPhoto && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => updateActiveChat({ contactPhoto: null })}
-              >
-                Remove
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Script</Label>
-          <Textarea
-            className="min-h-[260px] font-mono text-sm"
-            value={activeChat.script}
-            onChange={(e) => updateActiveChat({ script: e.target.value })}
-          />
-          <p className="text-xs text-muted-foreground">
-            Formato: <code>- iMessage: nome</code> ou <code>- Whatsapp: nome</code> (define o template). Use <code>- Direct iMessage: nome</code> ou <code>- Group Whatsapp: nome</code> para definir o modo. Linhas: <code>1: NomeDaVoz&gt; texto</code>.
-          </p>
-        </div>
-
-        <Button onClick={parseScript} className="w-full">
-          Parse Script
-        </Button>
-
-        {/* Voice library */}
-        <div className="space-y-3 rounded-lg border p-4">
-          <h2 className="font-semibold text-sm">Biblioteca de vozes</h2>
-          <p className="text-xs text-muted-foreground">
-            Salve aqui as vozes que você usa com frequência. Depois é só selecionar pelo nome ao mapear personagens.
-          </p>
-          <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
-            <Input
-              placeholder="Nome (ex: Adam)"
-              value={newVoiceName}
-              onChange={(e) => setNewVoiceName(e.target.value)}
-            />
-            <Input
-              className="font-mono text-xs"
-              placeholder="voice_id"
-              value={newVoiceId}
-              onChange={(e) => setNewVoiceId(e.target.value)}
-            />
-            <Button size="sm" onClick={addSavedVoice}>
-              <Plus className="h-3 w-3 mr-1" /> Salvar
-            </Button>
-          </div>
-          {savedVoices.length > 0 && (
-            <div className="space-y-1.5 pt-1">
-              {savedVoices.map((v) => (
-                <div key={v.name} className="flex items-center gap-2 text-xs">
-                  <span className="font-medium w-24 truncate">{v.name}</span>
-                  <code className="flex-1 truncate text-muted-foreground">{v.voiceId}</code>
-                  <button
-                    onClick={() => removeSavedVoice(v.name)}
-                    className="opacity-60 hover:opacity-100"
-                    aria-label="Remove"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {uniqueCharacters.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="font-semibold text-sm">Voice IDs por personagem</h2>
-            <p className="text-xs text-muted-foreground">
-              Configure as vozes e fotos de cada personagem. Faça upload, use o botão Colar ou selecione a linha do personagem e use <code>Ctrl+V</code>.
-            </p>
-            {uniqueCharacters.map((name) => {
-              const isVoice = name in activeChat.voiceMap;
-              const currentId = isVoice ? activeChat.voiceMap[name] : "";
-              const matched = savedVoices.find((v) => v.voiceId === currentId);
-              const photoInputId = `photo-input-${name}`;
-              const photoUrl = activeChat.characterPhotos?.[name];
-              return (
-                <div
-                  key={name}
-                  tabIndex={0}
-                  className="space-y-2 border-b last:border-b-0 pb-3 last:pb-0 focus:outline-none focus:bg-zinc-800/20 focus-visible:ring-1 focus-visible:ring-zinc-700 rounded-md p-2 -mx-2 transition-all outline-none"
-                  onPaste={(e) => {
-                    const items = e.clipboardData?.items;
-                    if (!items) return;
-                    for (const it of Array.from(items)) {
-                      if (it.type.startsWith("image/")) {
-                        const file = it.getAsFile();
-                        if (file) {
-                          e.preventDefault();
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const b64 = String(reader.result || "");
-                            updateActiveChat({
-                              characterPhotos: {
-                                ...(activeChat.characterPhotos || {}),
-                                [name]: b64,
-                              },
-                            });
-                          };
-                          reader.readAsDataURL(file);
-                          return;
-                        }
-                      }
-                    }
-                    const text = e.clipboardData?.getData("text");
-                    if (text && /^https?:\/\//i.test(text.trim())) {
-                      e.preventDefault();
-                      updateActiveChat({
-                        characterPhotos: {
-                          ...(activeChat.characterPhotos || {}),
-                          [name]: text.trim(),
-                        },
-                      });
-                    }
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold capitalize">{name}</Label>
-                    {!isVoice && (
-                      <span className="text-[10px] text-muted-foreground bg-zinc-800 px-1.5 py-0.5 rounded">
-                        Nome de Exibição
-                      </span>
-                    )}
-                  </div>
-                  
-                  {isVoice && (
-                    <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-                      <Input
-                        className="font-mono text-xs"
-                        placeholder="Adicionar voice_id manualmente"
-                        value={currentId}
-                        onChange={(e) =>
-                          updateActiveChat({
-                            voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
-                          })
-                        }
-                      />
-                      <select
-                        className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
-                        value={matched?.name || ""}
-                        onChange={(e) => {
-                          const sel = savedVoices.find((v) => v.name === e.target.value);
-                          if (sel) {
-                            updateActiveChat({
-                              voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
-                            });
-                          }
-                        }}
-                      >
-                        <option value="">Selecionar voz...</option>
-                        {savedVoices.map((v) => (
-                          <option key={v.name} value={v.name}>
-                            {v.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Avatar upload / remove UI */}
-                  <div className="flex items-center gap-2 mt-1">
-                    {photoUrl ? (
-                      <img
-                        src={photoUrl}
-                        alt={name}
-                        className="h-[28px] w-[28px] rounded-full object-cover border border-zinc-700"
-                      />
-                    ) : (
-                      <div className="h-[28px] w-[28px] rounded-full bg-gradient-to-br from-zinc-600 to-zinc-800 flex items-center justify-center text-white text-[10px] font-semibold uppercase border border-zinc-700">
-                        {name.charAt(0)}
-                      </div>
-                    )}
-                    <input
-                      id={photoInputId}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            const b64 = String(reader.result || "");
-                            updateActiveChat({
-                              characterPhotos: {
-                                ...(activeChat.characterPhotos || {}),
-                                [name]: b64,
-                              },
-                            });
-                          };
-                          reader.readAsDataURL(f);
-                        }
-                      }}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-7 px-2"
-                      onClick={() => document.getElementById(photoInputId)?.click()}
-                    >
-                      <Upload className="mr-1 h-3 w-3" /> Upload Foto
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-7 px-2"
-                      onClick={() => pasteCharacterPhoto(name)}
-                    >
-                      <ClipboardPaste className="mr-1 h-3 w-3" /> Colar
-                    </Button>
-                    {photoUrl && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-500 hover:text-red-700 text-xs h-7 px-2"
-                        onClick={() => {
-                          if (confirm(`Remover a foto de ${name}?`)) {
-                            const updated = { ...(activeChat.characterPhotos || {}) };
-                            delete updated[name];
-                            updateActiveChat({ characterPhotos: updated });
-                          }
-                        }}
-                      >
-                        Remover
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-
-        {(() => {
-          const isGroup = activeChat.isGroupChat ?? isGroupChat;
-          if (!isGroup) return null;
-          const displayNames = Array.from(
-            new Set(
-              activeChat.messages
-                .filter((m): m is TextMsg => m.type === "text")
-                .map((m) => m.displayName || m.voiceName)
-                .filter((n): n is string => !!n)
-            )
-          );
-          if (displayNames.length === 0) return null;
-          const colors = activeChat.nameColors || {};
-          return (
-            <div className="space-y-3 rounded-lg border p-4">
-              <h2 className="font-semibold text-sm">Cores dos nomes (Group Chat)</h2>
-              <p className="text-xs text-muted-foreground">
-                Escolha a cor do nome exibido acima das mensagens no chat de grupo.
-              </p>
-              {displayNames.map((name) => {
-                const current = colors[name] || "";
-                return (
-                  <div key={name} className="flex items-center gap-2">
-                    <Label className="text-xs w-24 truncate capitalize">{name}</Label>
-                    <div
-                      className="h-5 w-5 rounded-full border"
-                      style={{
-                        backgroundColor:
-                          current ||
-                          (chatTheme === "whatsapp" ? "#53bdeb" : "#8e8e93"),
-                      }}
-                    />
-                    <select
-                      className="h-9 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
-                      value={current}
-                      onChange={(e) =>
-                        updateActiveChat({
-                          nameColors: { ...colors, [name]: e.target.value },
-                        })
-                      }
-                    >
-                      {NAME_COLOR_OPTIONS.map((opt) => (
-                        <option key={opt.label} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
-
-        <div className="flex flex-col sm:flex-row gap-2 w-full">
-          <Button
-            onClick={() => generateAudios(false)}
-            disabled={generating}
-            className="flex-1 text-xs"
-            variant="secondary"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Gerando {genProgress.done}/{genProgress.total}
-              </>
-            ) : (
-              "Gerar áudios (todos os chats)"
-            )}
-          </Button>
-          <Button
-            onClick={() => generateAudios(true)}
-            disabled={generating}
-            className="flex-1 text-xs"
-            variant="outline"
-          >
-            Continuar de Onde Parou
-          </Button>
-        </div>
-
-        {/* Post-Generation Editor */}
-        {(() => {
-          const textMsgs = activeChat.messages.filter(
-            (m): m is TextMsg => m.type === "text"
-          );
-          const hasAnyAudio = textMsgs.some((m) => !!m.audioUrl);
-          if (textMsgs.length === 0 || !hasAnyAudio) return null;
-          return (
-            <Collapsible
-              open={editorOpen}
-              onOpenChange={setEditorOpen}
-              className="rounded-lg border"
-            >
-              <CollapsibleTrigger className="flex w-full items-center justify-between p-4 text-left">
+      {/* MAIN CONTAINER */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-zinc-950 relative">
+        <div className="flex-1 flex overflow-hidden">
+          
+          {/* 2. WORKSPACE CENTRAL */}
+          <main className="flex-1 overflow-y-auto p-8 space-y-6 bg-zinc-950 pb-24">
+            
+            {/* SEÇÃO: PROJETO */}
+            {activeSection === "project" && (
+              <div className="space-y-6 max-w-3xl">
                 <div>
-                  <h2 className="font-semibold text-sm">Post-Generation Editor</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Corrija typos ou troque a voz de mensagens individuais sem regerar tudo.
+                  <h2 className="text-xl font-bold tracking-tight">📁 Gerenciar Projeto</h2>
+                  <p className="text-xs text-zinc-400">Configure o nome, tema e gerencie chats e salvamentos locais.</p>
+                </div>
+
+                {/* Nome do Projeto + Salvar */}
+                <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <Label className="text-xs text-zinc-300">Nome do Projeto</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      placeholder="Ex: Story do Nate"
+                      className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
+                    />
+                    <Button
+                      onClick={handleSaveProject}
+                      disabled={savingProject}
+                      variant="secondary"
+                      className="h-9"
+                    >
+                      {savingProject ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4 mr-1.5" /> Salvar
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-zinc-400">
+                    Salva o script, áudios e imagens localmente (IndexedDB) para evitar regerar falas.
                   </p>
                 </div>
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${editorOpen ? "rotate-180" : ""}`}
-                />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-4 pb-4 space-y-3">
-                {textMsgs.map((msg) => {
-                  const isLoading = regeneratingMsgId === msg.id;
-                  return (
-                    <div key={msg.id} className="rounded-md border p-3 space-y-2">
-                      <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
-                        <div className="space-y-2">
-                          <Input
-                            className="h-8 text-xs"
-                            placeholder="Voz (ex: Adam)"
-                            value={msg.voiceName}
-                            onChange={(e) =>
-                              updateTextMessage(msg.id, { voiceName: e.target.value })
-                            }
-                          />
-                          <Textarea
-                            className="text-xs min-h-[60px]"
-                            value={msg.text}
-                            onChange={(e) =>
-                              updateTextMessage(msg.id, {
-                                text: e.target.value,
-                                spokenText: undefined,
-                              })
-                            }
-                          />
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isLoading || !msg.voiceName.trim() || !msg.text.trim()}
-                          onClick={() => regenerateOneAudio(msg.id)}
-                          title="Regenerar este áudio"
-                        >
-                          {isLoading ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
-                      {msg.audioUrl && (
-                        <audio controls src={msg.audioUrl} className="h-8 w-full mt-2" />
-                      )}
-                    </div>
-                  );
-                })}
-              </CollapsibleContent>
-            </Collapsible>
-          );
-        })()}
 
-        <div className="space-y-3 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
-              <Volume2 className="h-4 w-4" /> Biblioteca de Áudios ({generatedAudios.length})
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Áudios gerados nesta sessão. Útil para recuperar áudios após re-parsear o script ou vinculá-los manualmente.
-          </p>
-          
-          {generatedAudios.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic bg-zinc-900/10 p-3 rounded-md text-center">
-              Nenhum áudio gerado nesta sessão ainda.
-            </p>
-          ) : (
-            <>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="flex-1 text-xs h-8"
-                  onClick={() => {
-                    let count = 0;
-                    const updatedMessages = activeChat.messages.map((m) => {
-                      if (m.type === "text" && !m.audioUrl) {
-                        const match = generatedAudios.find(
-                          (g) =>
-                            g.voiceName.toLowerCase() === m.voiceName.toLowerCase() &&
-                            g.text.toLowerCase() === m.text.toLowerCase()
-                        );
-                        if (match) {
-                          count++;
-                          return { ...m, audioUrl: match.audioUrl };
-                        }
-                      }
-                      return m;
-                    });
-                    if (count > 0) {
-                      updateActiveChat({ messages: updatedMessages });
-                      alert(`${count} áudio(s) correspondente(s) vinculado(s) ao script!`);
-                    } else {
-                      alert("Nenhum áudio correspondente pendente encontrado.");
-                    }
-                  }}
-                >
-                  Vincular Correspondentes
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-xs text-red-500 hover:text-red-700 h-8"
-                  onClick={() => {
-                    if (confirm("Limpar toda a biblioteca de áudios gerados?")) {
-                      setGeneratedAudios([]);
-                    }
-                  }}
-                >
-                  Limpar Tudo
-                </Button>
-              </div>
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                {generatedAudios.map((g, idx) => {
-                  const isLinked = activeChat.messages.some(
-                    (m) => m.type === "text" && m.audioUrl === g.audioUrl
-                  );
-                  return (
-                    <div key={idx} className="rounded-md border p-2.5 space-y-1.5 text-xs bg-zinc-900/10">
-                      <div className="flex justify-between items-center font-semibold text-zinc-300">
-                        <span className="capitalize">{g.voiceName}</span>
-                        {isLinked ? (
-                          <span className="text-[10px] text-green-500 bg-green-950/20 px-1.5 py-0.5 rounded border border-green-900/30">
-                            Vinculado
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-zinc-400 bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-700/30">
-                            Não Vinculado
-                          </span>
+                {/* Temas e Aparência rápida */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <Label className="text-xs text-zinc-300">Tema do Chat</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={chatTheme === "imessage" ? "default" : "outline"}
+                        onClick={() => setChatTheme("imessage")}
+                        className="flex-1"
+                      >
+                        iMessage
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={chatTheme === "whatsapp" ? "default" : "outline"}
+                        onClick={() => setChatTheme("whatsapp")}
+                        className="flex-1"
+                      >
+                        WhatsApp (Dark)
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <Label className="text-xs text-zinc-300">Modo de Conversa</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={!effectiveGroupChat ? "default" : "outline"}
+                        onClick={() => {
+                          setIsGroupChat(false);
+                          updateActiveChat({ isGroupChat: false });
+                        }}
+                        className="flex-1"
+                      >
+                        Direct Message
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={effectiveGroupChat ? "default" : "outline"}
+                        onClick={() => {
+                          setIsGroupChat(true);
+                          updateActiveChat({ isGroupChat: true });
+                        }}
+                        className="flex-1"
+                      >
+                        Group Chat
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Video Background */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <Label className="text-xs text-zinc-300">Background do Vídeo</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {backgrounds.map((bg) => {
+                      const isActive = activeBackground === bg.value;
+                      const style: CSSProperties =
+                        bg.type === "color"
+                          ? { backgroundColor: bg.value }
+                          : {
+                              backgroundImage: `url(${bg.value})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                            };
+                      return (
+                        <div key={bg.id} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setActiveBackground(bg.value)}
+                            className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all ${
+                              isActive
+                                ? "border-purple-500 ring-2 ring-purple-500 scale-105"
+                                : "border-zinc-800 hover:border-zinc-700"
+                            }`}
+                            style={style}
+                            title={bg.type === "color" ? bg.value : "Custom image"}
+                          />
+                          {!bg.id.startsWith("default-") && (
+                            <button
+                              type="button"
+                              onClick={() => removeBackground(bg)}
+                              className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] leading-none"
+                              title="Remove"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-zinc-800/40">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={newColor}
+                        onChange={(e) => setNewColor(e.target.value)}
+                        className="w-10 h-8 rounded cursor-pointer border border-zinc-800 bg-transparent"
+                      />
+                      <Button size="sm" variant="outline" onClick={addColorBackground} className="h-8">
+                        Adicionar Cor
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={bgFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) addImageBackground(f);
+                          if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => bgFileInputRef.current?.click()}
+                        className="h-8"
+                      >
+                        <Upload className="w-3.5 h-3.5 mr-1.5" /> Enviar Imagem
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Gerenciamento de Chats */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <Label className="text-xs text-zinc-300">Mensagens e Chats do Projeto</Label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {chats.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                          c.id === activeChatId
+                            ? "bg-purple-600 text-white border-purple-500"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white"
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            setActiveChatId(c.id);
+                            setVisibleMessages([]);
+                          }}
+                          className="font-medium"
+                        >
+                          {c.name}
+                        </button>
+                        {chats.length > 1 && (
+                          <button
+                            className="opacity-70 hover:opacity-100 transition-opacity"
+                            onClick={() => removeChat(c.id)}
+                            aria-label="Remove chat"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         )}
                       </div>
-                      <p className="text-muted-foreground italic line-clamp-2" title={g.text}>“{g.text}”</p>
-                      <audio src={g.audioUrl} controls className="h-6 w-full mt-1" />
-                      <div className="flex gap-2 pt-1">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="text-[10px] h-6 flex-1 px-2"
-                          disabled={isLinked}
-                          onClick={() => {
-                            let bound = false;
-                            const updatedMessages = activeChat.messages.map((m) => {
-                              if (
-                                m.type === "text" &&
-                                !m.audioUrl &&
-                                m.voiceName.toLowerCase() === g.voiceName.toLowerCase() &&
-                                m.text.toLowerCase() === g.text.toLowerCase()
-                              ) {
-                                bound = true;
-                                return { ...m, audioUrl: g.audioUrl };
-                              }
-                              return m;
-                            });
-                            if (bound) {
-                              updateActiveChat({ messages: updatedMessages });
-                              alert("Áudio correspondente vinculado com sucesso!");
-                            } else {
-                              const textMsgsWithoutAudio = activeChat.messages.filter(
-                                (m): m is TextMsg => m.type === "text" && !m.audioUrl
-                              );
-                              if (textMsgsWithoutAudio.length === 0) {
-                                alert("Todas as mensagens de texto já possuem áudio.");
-                                return;
-                              }
-                              // Candidate: same voice, or first without audio
-                              const candidate = textMsgsWithoutAudio.find(
-                                (m) => m.voiceName.toLowerCase() === g.voiceName.toLowerCase()
-                              ) || textMsgsWithoutAudio[0];
-                              
-                              const updated = activeChat.messages.map((m) =>
-                                m.id === candidate.id && m.type === "text"
-                                  ? { ...m, audioUrl: g.audioUrl }
-                                  : m
-                              );
-                              updateActiveChat({ messages: updated });
-                              alert(`Vinculado à linha: "${candidate.voiceName}: ${candidate.text}"`);
-                            }
-                          }}
-                        >
-                          {isLinked ? "Vinculado" : "Vincular ao Script"}
-                        </Button>
+                    ))}
+                    <Button size="sm" variant="outline" onClick={addChat} className="h-8">
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Novo Chat
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/40">
+                    <div className="space-y-2">
+                      <Label className="text-[11px] text-zinc-400">Rótulo do Chat</Label>
+                      <Input
+                        value={activeChat.name}
+                        onChange={(e) => updateActiveChat({ name: e.target.value })}
+                        className="bg-zinc-950 border-zinc-800 text-zinc-200 h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-[11px] text-zinc-400">Nome do Contato</Label>
+                      <Input
+                        value={activeChat.contactName}
+                        onChange={(e) => updateActiveChat({ contactName: e.target.value })}
+                        className="bg-zinc-950 border-zinc-800 text-zinc-200 h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Foto de Contato */}
+                  <div
+                    className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4"
+                    onPaste={(e) => {
+                      const items = e.clipboardData?.items;
+                      if (!items) return;
+                      for (const it of Array.from(items)) {
+                        if (it.type.startsWith("image/")) {
+                          const file = it.getAsFile();
+                          if (file) {
+                            e.preventDefault();
+                            onUploadContactPhoto(file);
+                            return;
+                          }
+                        }
+                      }
+                      const text = e.clipboardData?.getData("text");
+                      if (text && /^https?:\/\//i.test(text.trim())) {
+                        e.preventDefault();
+                        updateActiveChat({ contactPhoto: text.trim() });
+                      }
+                    }}
+                  >
+                    <Label className="flex items-center gap-1.5 text-[11px] text-zinc-300">
+                      <User className="h-3.5 w-3.5" /> Foto do Contato
+                    </Label>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {activeChat.contactPhoto ? (
+                        <img
+                          src={activeChat.contactPhoto}
+                          alt="contact"
+                          className="h-10 w-10 rounded-full object-cover border border-zinc-800"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-800 flex items-center justify-center text-white text-xs font-medium border border-zinc-800">
+                          {activeChat.contactName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) onUploadContactPhoto(f);
+                        }}
+                      />
+                      <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => photoInputRef.current?.click()}>
+                        <Upload className="mr-1 h-3 w-3" /> Upload
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={pasteContactPhoto}>
+                        <ClipboardPaste className="mr-1 h-3 w-3" /> Colar
+                      </Button>
+                      {activeChat.contactPhoto && (
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-[10px] h-6 text-red-500 hover:text-red-700 px-2"
-                          onClick={() => {
-                            setGeneratedAudios((prev) => prev.filter((_, i) => i !== idx));
-                          }}
+                          className="h-7 text-[10px] text-red-400 hover:text-red-300"
+                          onClick={() => updateActiveChat({ contactPhoto: null })}
                         >
-                          Excluir
+                          Remover
                         </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lista de Projetos do IndexedDB */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <h3 className="font-semibold text-sm text-zinc-200">Meus Projetos Salvos</h3>
+                  {projects.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-zinc-800 p-8 text-center text-zinc-500 text-xs">
+                      Nenhum projeto salvo na base local ainda.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {projects.map((p) => {
+                        const totalMsgs = p.chats.reduce((acc, c) => acc + c.messages.length, 0);
+                        return (
+                          <div
+                            key={p.id}
+                            className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 space-y-3 hover:border-zinc-700 transition"
+                          >
+                            <div>
+                              <div className="font-semibold text-zinc-200 truncate text-xs">{p.projectName}</div>
+                              <div className="text-[10px] text-zinc-400">
+                                {new Date(p.createdAt).toLocaleString()}
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-zinc-400">
+                              {p.chats.length} chat(s) • {totalMsgs} mensagens • tema {p.theme}
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <Button size="sm" onClick={() => handleLoadProject(p)} className="flex-1 h-7 text-[10px]">
+                                <FolderOpen className="h-3 w-3 mr-1" /> Carregar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-[10px] text-red-400 hover:text-red-300 hover:bg-zinc-900"
+                                onClick={() => handleDeleteProject(p.id)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO: SCRIPT */}
+            {activeSection === "script" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">📝 Escrever Script</h2>
+                  <p className="text-xs text-zinc-400">Escreva o roteiro da história com personagens identificados ou use inteligência artificial.</p>
+                </div>
+
+                {/* ASSISTENTE DE ROTEIRO IA */}
+                <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 space-y-4 hover:border-zinc-700/60 transition duration-150 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition pointer-events-none">
+                    <Sparkles className="h-32 w-32 text-purple-500" />
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg border border-purple-500/20">
+                        <Sparkles className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-xs text-zinc-200">Assistente de Roteiro IA</h3>
+                        <p className="text-[10px] text-zinc-400">Gere roteiros completos ou continue capítulo por capítulo.</p>
+                      </div>
+                    </div>
+                    
+                    {/* Status da Chave de API */}
+                    <div>
+                      {directorLlmProvider === "local" ? (
+                        <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          💻 LLM Local ({localLlmModel})
+                        </span>
+                      ) : !(geminiApiKey || openaiApiKey) ? (
+                        <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse">
+                          ⚠️ Sem API Key
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          API Key Pronta ({directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3.5 pt-2 border-t border-zinc-800/40 text-xs">
+                    {/* Se não houver chave de API */}
+                    {directorLlmProvider !== "local" && !(geminiApiKey || openaiApiKey) && (
+                      <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/10 text-[10px] text-red-400/90 leading-relaxed">
+                        Configure sua chave de API nas <button className="underline font-semibold hover:text-red-300" onClick={() => setActiveSection("settings")}>Configurações Avançadas</button> para habilitar a geração por IA.
+                      </div>
+                    )}
+
+                    {/* Premissa Geral */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-[10px] text-zinc-400 font-medium">Premissa Geral da História (Ideia Principal)</Label>
+                      <Textarea
+                        className="min-h-[60px] bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg"
+                        placeholder="Ex: Lucas e Ana são casados. Lucas descobre uma mensagem suspeita no celular dela e a confronta. No final, era uma surpresa..."
+                        value={activeChat.aiPrompt || ""}
+                        onChange={(e) => updateActiveChat({ aiPrompt: e.target.value })}
+                      />
+                    </div>
+
+                    {/* Direção do Próximo Capítulo (Só se o script já tiver algo) */}
+                    {(activeChat.script || "").trim().length > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-[10px] text-zinc-400 font-medium">Direção para o Próximo Capítulo (Opcional)</Label>
+                        <Input
+                          className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg"
+                          placeholder="Ex: Ana chora e diz que é mentira. Lucas pede pra ver o celular dela..."
+                          value={activeChat.aiChapterInstruction || ""}
+                          onChange={(e) => updateActiveChat({ aiChapterInstruction: e.target.value })}
+                        />
+                      </div>
+                    )}
+
+                    {/* Link do YouTube */}
+                    <div className="flex flex-col gap-1.5 pt-2 border-t border-zinc-800/40">
+                      <Label className="text-[10px] text-zinc-400 font-medium">Extrair Roteiro do YouTube (Link do Vídeo)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg flex-1 h-9"
+                          placeholder="Ex: https://www.youtube.com/watch?v=..."
+                          value={youtubeUrl}
+                          onChange={(e) => setYoutubeUrl(e.target.value)}
+                        />
+                        <Button
+                          onClick={generateScriptFromYouTube}
+                          disabled={isGeneratingScript || !(geminiApiKey || openaiApiKey)}
+                          className="bg-purple-600 hover:bg-purple-500 text-white h-9 px-3 text-xs font-semibold rounded-lg shrink-0 flex items-center gap-1"
+                        >
+                          {isGeneratingScript ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Processando...
+                            </>
+                          ) : (
+                            <>
+                              <span>Importar</span>
+                              <span>🎥</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      {/* Instruções para Adaptação do Vídeo */}
+                      <Label className="text-[10px] text-zinc-400 font-medium pt-1">Instruções de Adaptação / Tradução (Opcional)</Label>
+                      <Textarea
+                        className="min-h-[50px] bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg"
+                        placeholder="Ex: Traduzir para português, deixar o tom mais dramático, manter nomes originais..."
+                        value={youtubeInstructions}
+                        onChange={(e) => setYoutubeInstructions(e.target.value)}
+                      />
+                      
+                      {/* Checkbox de visão (Apenas se Gemini estiver selecionado) */}
+                      {directorLlmProvider === "gemini" && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="checkbox"
+                            id="visual-analysis-chk"
+                            className="rounded bg-zinc-950 border-zinc-800 text-purple-600 focus:ring-purple-600 cursor-pointer h-3.5 w-3.5"
+                            checked={visualAnalysis}
+                            onChange={(e) => setVisualAnalysis(e.target.checked)}
+                          />
+                          <label
+                            htmlFor="visual-analysis-chk"
+                            className="text-[10px] text-zinc-400 font-medium cursor-pointer selection:bg-transparent"
+                          >
+                            Ativar Análise Visual (Fazer IA assistir ao vídeo - consome mais tokens)
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Botões de Ação */}
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        onClick={() => generateScriptWithAI(false)}
+                        disabled={isGeneratingScript || !(geminiApiKey || openaiApiKey)}
+                        className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 h-9 text-xs font-semibold rounded-lg"
+                      >
+                        {isGeneratingScript && !activeChat.script ? (
+                          <>
+                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin text-purple-400" />
+                            Gerando Início...
+                          </>
+                        ) : (
+                          "Gerar Novo Roteiro 🪄"
+                        )}
+                      </Button>
+                      
+                      {(activeChat.script || "").trim().length > 0 && (
+                        <Button
+                          onClick={() => generateScriptWithAI(true)}
+                          disabled={isGeneratingScript || !(geminiApiKey || openaiApiKey)}
+                          className="flex-1 bg-purple-600 hover:bg-purple-500 text-white h-9 text-xs font-semibold rounded-lg"
+                        >
+                          {isGeneratingScript && activeChat.script ? (
+                            <>
+                              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin text-white" />
+                              Escrevendo Capítulo...
+                            </>
+                          ) : (
+                            "Continuar Capítulo ✨"
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-zinc-300">Script do Chat</Label>
+                    <span className="text-[10px] text-zinc-400 font-mono">Formato: 1: Personagem&gt; Fala</span>
+                  </div>
+                  <Textarea
+                    className="min-h-[350px] font-mono text-xs bg-zinc-950 border-zinc-800 text-zinc-200 focus:ring-1 focus:ring-purple-600 leading-relaxed"
+                    value={activeChat.script}
+                    onChange={(e) => updateActiveChat({ script: e.target.value })}
+                  />
+                  <div className="p-3 bg-zinc-900/40 border border-zinc-800 rounded-lg text-[10px] text-zinc-400 space-y-1">
+                    <p className="font-semibold text-zinc-300">Dicas rápidas de formato:</p>
+                    <p>• Definir tema: <code>- iMessage: Nate</code> ou <code>- Whatsapp: Nate</code></p>
+                    <p>• Mensagens: <code>1: NomePersonagem&gt; Texto da fala</code> (para lado esquerdo/remoto) ou <code>2: NomePersonagem&gt; Texto</code> (lado direito/autor)</p>
+                    <p>• Mídias: <code>1: img: descrição da imagem</code> ou <code>2: gif: descrição do gif</code></p>
+                  </div>
+                </div>
+
+                <Button onClick={parseScript} className="w-full bg-purple-600 hover:bg-purple-500 text-white h-10 font-medium text-xs">
+                  Processar Roteiro (Parse Script)
+                </Button>
+              </div>
+            )}
+
+            {/* SEÇÃO: FORMATADOR DE SCRIPT */}
+            {activeSection === "formatter" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">🪄 Formatador de Script por IA</h2>
+                  <p className="text-xs text-zinc-400">Converta qualquer formato de diálogo ou roteiro bruto para a formatação correta do Chat Story.</p>
+                </div>
+
+                <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 space-y-4 hover:border-zinc-700/60 transition duration-150 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition pointer-events-none">
+                    <Wand2 className="h-32 w-32 text-purple-500" />
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Se não houver chave de API */}
+                    {directorLlmProvider !== "local" && !(geminiApiKey || openaiApiKey) && (
+                      <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/10 text-[10px] text-red-400/90 leading-relaxed">
+                        Configure sua chave de API nas <button className="underline font-semibold hover:text-red-300" onClick={() => setActiveSection("settings")}>Configurações Avançadas</button> para habilitar a formatação por IA.
+                      </div>
+                    )}
+
+                    {/* Roteiro Original */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Roteiro Original (Qualquer Formato)</Label>
+                      <Textarea
+                        className="min-h-[140px] bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg placeholder-zinc-700"
+                        placeholder="Ex:&#10;Lucas: oi amor, tudo bem?&#10;Ana diz que sim, mas está preocupada com o Lucas.&#10;Lucas responde que não é nada..."
+                        value={rawScriptInput}
+                        onChange={(e) => setRawScriptInput(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Instruções de Formatação */}
+                    <div className="flex flex-col gap-1.5">
+                      <Label className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Instruções de Adaptação / Tradução (Opcional)</Label>
+                      <Input
+                        className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-purple-600 focus:border-purple-600 rounded-lg placeholder-zinc-700"
+                        placeholder="Ex: Traduzir para português, deixar as falas mais curtas e dramáticas..."
+                        value={formatterInstructions}
+                        onChange={(e) => setFormatterInstructions(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Botão de Formatação */}
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={formatScriptWithAI}
+                        disabled={isFormatting || (directorLlmProvider !== "local" && !(geminiApiKey || openaiApiKey))}
+                        className="bg-purple-600 hover:bg-purple-500 text-white h-9 px-4 text-xs font-semibold rounded-lg shrink-0 flex items-center gap-1.5"
+                      >
+                        {isFormatting ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Formatando Roteiro...
+                          </>
+                        ) : (
+                          <>
+                            <span>Formatar com IA</span>
+                            <span>🪄</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resultado da Formatação */}
+                {formattedScriptOutput && (
+                  <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Resultado da Formatação</Label>
+                      <div className="text-[10px] text-zinc-500 font-medium">Formato Pronto para Parse</div>
+                    </div>
+                    
+                    <Textarea
+                      readOnly
+                      className="min-h-[140px] bg-zinc-950 border-zinc-800 text-zinc-300 text-xs rounded-lg font-mono placeholder-zinc-700 cursor-default"
+                      value={formattedScriptOutput}
+                    />
+
+                    <div className="flex gap-3 justify-end pt-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setFormattedScriptOutput("")}
+                        className="border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 h-9 text-xs font-semibold rounded-lg"
+                      >
+                        Limpar Resultado
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          updateActiveChat({
+                            script: formattedScriptOutput,
+                          });
+                          parseScript(formattedScriptOutput);
+                          toast.success("Roteiro aplicado com sucesso!");
+                          setActiveSection("script");
+                        }}
+                        className="bg-purple-600 hover:bg-purple-500 text-white h-9 px-4 text-xs font-semibold rounded-lg shrink-0"
+                      >
+                        Aplicar ao Roteiro do Chat Ativo 📝
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SEÇÃO: PERSONAGENS & VOZES */}
+            {activeSection === "characters" && (
+              <div className="space-y-6 max-w-4xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">👥 Personagens & Vozes</h2>
+                  <p className="text-xs text-zinc-400">Configure o avatar, voz e tom de fala de cada personagem detectado no script.</p>
+                </div>
+
+                {uniqueCharacters.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-zinc-800 p-12 text-center text-zinc-500 bg-zinc-900/10 text-xs">
+                    Nenhum personagem carregado. Cole o script e clique em <strong>Parse Script</strong> na seção de <strong>Script</strong> primeiro.
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {uniqueCharacters.map((name) => {
+                        const isVoice = name in activeChat.voiceMap;
+                        const currentId = isVoice ? activeChat.voiceMap[name] : "";
+                        const matched = savedVoices.find((v) => v.voiceId === currentId);
+                        const photoInputId = `photo-input-${name}`;
+                        const photoUrl = activeChat.characterPhotos?.[name];
+                        const configured = isVoice && currentId.trim().length > 0;
+
+                        return (
+                          <div
+                            key={name}
+                            className="bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700/60 transition duration-150"
+                          >
+                            <div className="space-y-3">
+                              {/* Card Header */}
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  {photoUrl ? (
+                                    <img
+                                      src={photoUrl}
+                                      alt={name}
+                                      className="h-10 w-10 rounded-full object-cover border border-zinc-800"
+                                    />
+                                  ) : (
+                                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold uppercase border border-zinc-850">
+                                      {name.charAt(0)}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <h3 className="font-semibold text-xs text-zinc-200 capitalize">{name}</h3>
+                                    <p className="text-[9px] text-zinc-400">
+                                      {isVoice ? "Personagem com fala" : "Nome de exibição"}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {isVoice && (
+                                  configured ? (
+                                    <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                      ✅ Voz configurada
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                      ⚠️ Sem voz
+                                    </span>
+                                  )
+                                )}
+                              </div>
+
+                              {isVoice && (
+                                <div className="space-y-2.5 pt-2 border-t border-zinc-800/40">
+                                  {/* Voz da biblioteca */}
+                                  <div className="flex flex-col gap-1">
+                                    <Label className="text-[9px] text-zinc-400">Voz da Biblioteca</Label>
+                                    <select
+                                      className="h-8 w-full rounded border border-zinc-800 bg-zinc-950 px-2 text-[11px] text-zinc-200 focus:outline-none"
+                                      value={matched?.name || ""}
+                                      onChange={(e) => {
+                                        const sel = savedVoices.find((v) => v.name === e.target.value);
+                                        if (sel) {
+                                          updateActiveChat({
+                                            voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <option value="">Selecionar...</option>
+                                      {savedVoices.map((v) => (
+                                        <option key={v.name} value={v.name}>
+                                          {v.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Input Voice ID manual */}
+                                  <div className="flex flex-col gap-1">
+                                    <Label className="text-[9px] text-zinc-400">Voice ID Manual</Label>
+                                    <Input
+                                      className="h-8 font-mono text-[10px] bg-zinc-950 border-zinc-800 text-zinc-200"
+                                      placeholder="Ex: 21m00Tcm4Tlv..."
+                                      value={currentId}
+                                      onChange={(e) =>
+                                        updateActiveChat({
+                                          voiceMap: { ...activeChat.voiceMap, [name]: e.target.value },
+                                        })
+                                      }
+                                    />
+                                  </div>
+
+                                  {/* Áudio clone */}
+                                  {(ttsProvider === "omnivoice" || ttsProvider === "qwen3") && (
+                                    <div className="pt-2 border-t border-zinc-850 flex items-center justify-between gap-2">
+                                      <span className="text-[9px] text-zinc-400 font-medium">Áudio de Ref:</span>
+                                      <input
+                                        id={`audio-input-${name}`}
+                                        type="file"
+                                        accept="audio/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0];
+                                          if (f) {
+                                            const reader = new FileReader();
+                                            reader.onload = () => {
+                                              const b64 = String(reader.result || "");
+                                              updateActiveChat({
+                                                characterAudios: {
+                                                  ...(activeChat.characterAudios || {}),
+                                                  [name]: b64,
+                                                },
+                                              });
+                                            };
+                                            reader.readAsDataURL(f);
+                                          }
+                                        }}
+                                      />
+                                      {activeChat.characterAudios?.[name] ? (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[8px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">🎵 Salvo</span>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-6 px-1 text-[8px] text-red-400 hover:text-red-300 hover:bg-transparent"
+                                            onClick={() => {
+                                              if (confirm(`Remover áudio de referência de ${name}?`)) {
+                                                const updated = { ...(activeChat.characterAudios || {}) };
+                                                delete updated[name];
+                                                updateActiveChat({ characterAudios: updated });
+                                              }
+                                            }}
+                                          >
+                                            Limpar
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-6 px-2 text-[8px] border-zinc-800 bg-zinc-950 text-zinc-350"
+                                          onClick={() => document.getElementById(`audio-input-${name}`)?.click()}
+                                        >
+                                          <Upload className="h-2.5 w-2.5 mr-1" /> Enviar WAV/MP3
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Foto Actions */}
+                            <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-zinc-800/40">
+                              <input
+                                id={photoInputId}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) {
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      const b64 = String(reader.result || "");
+                                      updateActiveChat({
+                                        characterPhotos: {
+                                          ...(activeChat.characterPhotos || {}),
+                                          [name]: b64,
+                                        },
+                                      });
+                                    };
+                                    reader.readAsDataURL(f);
+                                  };
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-[8px] border-zinc-800 bg-zinc-950 text-zinc-350"
+                                onClick={() => document.getElementById(photoInputId)?.click()}
+                              >
+                                Upload Foto
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-[8px] border-zinc-800 bg-zinc-950 text-zinc-355"
+                                onClick={() => pasteCharacterPhoto(name)}
+                              >
+                                Colar Foto
+                              </Button>
+                              {photoUrl && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-[8px] text-red-400 hover:text-red-300 ml-auto"
+                                  onClick={() => {
+                                    if (confirm(`Remover a foto de ${name}?`)) {
+                                      const updated = { ...(activeChat.characterPhotos || {}) };
+                                      delete updated[name];
+                                      updateActiveChat({ characterPhotos: updated });
+                                    }
+                                  }}
+                                >
+                                  Limpar Foto
+                                </Button>
+                              )}
+                            </div>
+
+                            {/* WA/Group chat name color */}
+                            {(() => {
+                              const isGroup = activeChat.isGroupChat ?? isGroupChat;
+                              if (!isGroup) return null;
+                              const colors = activeChat.nameColors || {};
+                              const current = colors[name] || "";
+                              return (
+                                <div className="pt-2 mt-2 border-t border-zinc-800/40 flex items-center justify-between gap-2">
+                                  <span className="text-[9px] text-zinc-400">Cor do Nome:</span>
+                                  <select
+                                    className="h-6 rounded border border-zinc-850 bg-zinc-950 px-1 text-[9px] text-zinc-350 focus:outline-none"
+                                    value={current}
+                                    onChange={(e) =>
+                                      updateActiveChat({
+                                        nameColors: { ...colors, [name]: e.target.value },
+                                      })
+                                    }
+                                  >
+                                    {NAME_COLOR_OPTIONS.map((opt) => (
+                                      <option key={opt.label} value={opt.value}>
+                                        {opt.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Biblioteca de vozes */}
+                    <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/10 p-5">
+                      <h3 className="font-semibold text-xs text-zinc-200">Biblioteca de Vozes</h3>
+                      <p className="text-[10px] text-zinc-400">
+                        Salve vozes frequentes aqui. Mapeie personagens selecionando-os pelo nome.
+                      </p>
+                      
+                      {ttsProvider === "omnivoice" || ttsProvider === "qwen3" ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-[2fr_1fr] gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-zinc-400">Nome da Voz</Label>
+                              <Input
+                                placeholder="Nome (ex: Voz do Adam)"
+                                value={newVoiceName}
+                                onChange={(e) => setNewVoiceName(e.target.value)}
+                                className="h-8 text-xs bg-zinc-955 border-zinc-800"
+                              />
+                            </div>
+                            <div className="space-y-1 self-end">
+                              <Button size="sm" onClick={addSavedVoice} className="w-full h-8 text-xs">
+                                Salvar
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-zinc-400">Gênero</Label>
+                              <select
+                                className="w-full h-8 text-[11px] border border-zinc-800 rounded bg-zinc-950 px-2"
+                                value={designGender}
+                                onChange={(e) => setDesignGender(e.target.value)}
+                              >
+                                <option value="male">Masculino</option>
+                                <option value="female">Feminino</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-zinc-400">Idade</Label>
+                              <select
+                                className="w-full h-8 text-[11px] border border-zinc-800 rounded bg-zinc-950 px-2"
+                                value={designAge}
+                                onChange={(e) => setDesignAge(e.target.value)}
+                              >
+                                <option value="">Não especificado</option>
+                                <option value="child">Criança</option>
+                                <option value="teenager">Adolescente</option>
+                                <option value="young adult">Jovem Adulto</option>
+                                <option value="middle-aged">Adulto</option>
+                                <option value="elderly">Idoso</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-zinc-400">Tom de Voz</Label>
+                              <select
+                                className="w-full h-8 text-[11px] border border-zinc-800 rounded bg-zinc-950 px-2"
+                                value={designPitch}
+                                onChange={(e) => setDesignPitch(e.target.value)}
+                              >
+                                <option value="">Não especificado</option>
+                                <option value="very low pitch">Muito Grave</option>
+                                <option value="low pitch">Grave</option>
+                                <option value="moderate pitch">Médio</option>
+                                <option value="high pitch">Agudo</option>
+                                <option value="very high pitch">Muito Agudo</option>
+                                <option value="whisper">Sussurro</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[9px] text-zinc-400">Sotaque</Label>
+                              <select
+                                className="w-full h-8 text-[11px] border border-zinc-800 rounded bg-zinc-950 px-2"
+                                value={designAccent}
+                                onChange={(e) => setDesignAccent(e.target.value)}
+                              >
+                                <option value="">Nenhum sotaque</option>
+                                <option value="portuguese accent">Sotaque Português</option>
+                                <option value="american accent">Sotaque Americano</option>
+                                <option value="british accent">Sotaque Britânico</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
+                          <Input
+                            placeholder="Nome (ex: Adam)"
+                            value={newVoiceName}
+                            onChange={(e) => setNewVoiceName(e.target.value)}
+                            className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                          />
+                          <Input
+                            className="font-mono text-xs h-8 bg-zinc-950 border-zinc-800 text-zinc-200"
+                            placeholder="voice_id"
+                            value={newVoiceId}
+                            onChange={(e) => setNewVoiceId(e.target.value)}
+                          />
+                          <Button size="sm" onClick={addSavedVoice} className="h-8">
+                            <Plus className="h-3.5 w-3.5 mr-1" /> Salvar
+                          </Button>
+                        </div>
+                      )}
+
+                      {savedVoices.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-zinc-800/40">
+                          {savedVoices.map((v) => (
+                            <div key={v.name} className="flex items-center justify-between text-[11px] bg-zinc-950 px-2.5 py-1.5 rounded border border-zinc-850">
+                              <span className="font-semibold text-zinc-200 w-24 truncate">{v.name}</span>
+                              <code className="flex-1 truncate text-zinc-400 text-[9px] ml-2">{v.voiceId}</code>
+                              <button
+                                onClick={() => removeSavedVoice(v.name)}
+                                className="opacity-60 hover:opacity-100 hover:text-red-400 transition ml-2"
+                                aria-label="Remove"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SEÇÃO: MÍDIAS (IMAGENS & VÍDEOS) */}
+            {activeSection === "media" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">🖼️ Configurar Mídias</h2>
+                  <p className="text-xs text-zinc-400">Configure uploads e links para imagens ou vídeos em mensagens multimídia.</p>
+                </div>
+
+                {imageMessages.length === 0 && videoMessages.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-zinc-800 p-12 text-center text-zinc-500 bg-zinc-900/10 text-xs">
+                    Nenhuma mensagem de mídia (imagem/vídeo) detectada no script ativo.
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {/* Imagens */}
+                    {imageMessages.map((m) => (
+                      <div
+                        key={m.id}
+                        className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-4"
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          for (const it of Array.from(items)) {
+                            if (it.type.startsWith("image/")) {
+                              const file = it.getAsFile();
+                              if (file) {
+                                e.preventDefault();
+                                onUploadImage(m.id, file);
+                                return;
+                              }
+                            }
+                          }
+                          const text = e.clipboardData?.getData("text");
+                          if (text && /^https?:\/\//i.test(text.trim())) {
+                            e.preventDefault();
+                            setImageUrlFor(m.id, text.trim());
+                          }
+                        }}
+                      >
+                        <div className="text-[11px] font-semibold text-zinc-350 flex items-center justify-between">
+                          <span>Mensagem ID #{m.id} (Lado {m.side})</span>
+                          <span className="italic font-normal">“{m.text}”</span>
+                        </div>
+                        
+                        <div className="flex gap-2 items-center">
+                          <Link2 className="h-4 w-4 text-zinc-500 shrink-0" />
+                          <Input
+                            placeholder="Cole URL ou imagem aqui (Ctrl+V)"
+                            value={m.imageUrl?.startsWith("blob:") ? "" : m.imageUrl ?? ""}
+                            onChange={(e) => setImageUrlFor(m.id, e.target.value || null)}
+                            className="bg-zinc-950 border-zinc-800 text-xs h-8"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            ref={(el) => {
+                              fileInputRefs.current[`${activeChatId}_${m.id}`] = el;
+                            }}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) onUploadImage(m.id, f);
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px]"
+                            onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
+                          >
+                            <Upload className="mr-1 h-3 w-3" /> Fazer Upload
+                          </Button>
+                          {m.imageUrl && (
+                            <>
+                              <img
+                                src={m.imageUrl}
+                                alt={m.text}
+                                className="h-10 w-10 object-cover rounded border border-zinc-800 ml-auto"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-[10px] text-red-400"
+                                onClick={() => setImageUrlFor(m.id, null)}
+                              >
+                                Limpar
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Vídeos */}
+                    {videoMessages.map((m) => (
+                      <div
+                        key={m.id}
+                        className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-4"
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          for (const it of Array.from(items)) {
+                            if (it.type.startsWith("video/") || it.type.startsWith("image/gif")) {
+                              const file = it.getAsFile();
+                              if (file) {
+                                e.preventDefault();
+                                onUploadVideo(m.id, file);
+                                return;
+                              }
+                            }
+                          }
+                          const text = e.clipboardData?.getData("text");
+                          if (text && /^https?:\/\//i.test(text.trim())) {
+                            e.preventDefault();
+                            setVideoUrlFor(m.id, text.trim());
+                          }
+                        }}
+                      >
+                        <div className="text-[11px] font-semibold text-zinc-350 flex items-center justify-between">
+                          <span>Mensagem ID #{m.id} (Lado {m.side})</span>
+                          <span className="italic font-normal">“{m.text}”</span>
+                        </div>
+
+                        <div className="flex gap-2 items-center">
+                          <Link2 className="h-4 w-4 text-zinc-500 shrink-0" />
+                          <Input
+                            placeholder="Cole URL de vídeo ou GIF aqui (Ctrl+V)"
+                            value={m.videoUrl?.startsWith("blob:") ? "" : m.videoUrl ?? ""}
+                            onChange={(e) => setVideoUrlFor(m.id, e.target.value || null)}
+                            className="bg-zinc-950 border-zinc-800 text-xs h-8"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            ref={(el) => {
+                              fileInputRefs.current[`${activeChatId}_${m.id}`] = el;
+                            }}
+                            type="file"
+                            accept="video/mp4,video/webm,image/gif"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) onUploadVideo(m.id, f);
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px]"
+                            onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
+                          >
+                            <Upload className="mr-1 h-3 w-3" /> Fazer Upload
+                          </Button>
+                          {m.videoUrl && (
+                            <>
+                              {m.videoType === "gif" ? (
+                                <img
+                                  src={m.videoUrl}
+                                  alt={m.text}
+                                  className="h-10 w-10 object-cover rounded border border-zinc-800 ml-auto"
+                                />
+                              ) : (
+                                <video
+                                  src={m.videoUrl}
+                                  className="h-10 w-10 object-cover rounded border border-zinc-800 ml-auto"
+                                />
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-[10px] text-red-400"
+                                onClick={() => setVideoUrlFor(m.id, null)}
+                              >
+                                Limpar
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SEÇÃO: GERAR ÁUDIOS */}
+            {activeSection === "generation" && (
+              <div className="space-y-6 max-w-4xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">⚡ Gerar & Sintetizar Áudios</h2>
+                  <p className="text-xs text-zinc-400">Gere todas as falas baseando-se nas vozes configuradas para cada personagem.</p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button
+                    onClick={() => generateAudios(false)}
+                    disabled={generating}
+                    className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-medium text-xs h-10 shadow-lg shadow-purple-600/10"
+                  >
+                    {generating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Sintetizando... {genProgress.done}/{genProgress.total}
+                      </>
+                    ) : (
+                      "Gerar Todos os Áudios 🎵"
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => generateAudios(true)}
+                    disabled={generating}
+                    className="flex-1 h-10 text-xs"
+                    variant="outline"
+                  >
+                    Continuar de Onde Parou
+                  </Button>
+                </div>
+
+                {/* PROGRESS BAR COM NOME DO PERSONAGEM */}
+                {generating && (
+                  <div className="space-y-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 shadow-sm animate-pulse">
+                    <div className="flex justify-between text-xs text-zinc-200 font-medium">
+                      <span>Processando: <strong className="text-purple-400 capitalize">{generatingCharacter || "Carregando"}</strong></span>
+                      <span>{Math.round((genProgress.done / (genProgress.total || 1)) * 100)}%</span>
+                    </div>
+                    <Progress
+                      value={(genProgress.done / (genProgress.total || 1)) * 100}
+                      className="h-2 bg-zinc-950 [&>div]:bg-purple-500"
+                    />
+                  </div>
+                )}
+
+                {/* Post-Generation Editor */}
+                {(() => {
+                  const textMsgs = activeChat.messages.filter((m): m is TextMsg => m.type === "text");
+                  if (textMsgs.length === 0) return null;
+                  return (
+                    <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                      <div className="flex items-center justify-between pb-3 border-b border-zinc-800/40">
+                        <div>
+                          <h3 className="font-semibold text-xs text-zinc-200">Editor de Falas e Emoções</h3>
+                          <p className="text-[10px] text-zinc-400">Visualize textos falados, edite emoções e escute os áudios gerados.</p>
+                        </div>
+                        
+                        {useDirector && (
+                          <Button
+                            size="sm"
+                            className="text-[10px] font-semibold flex items-center justify-center gap-1.5 h-8 bg-zinc-900 border border-zinc-800 text-zinc-200 hover:bg-zinc-850"
+                            disabled={isDirecting}
+                            onClick={directSpeechWithAI}
+                          >
+                            {isDirecting ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Dirigindo...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3 w-3 text-purple-400" />
+                                Direção de Emoções IA
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="space-y-3.5 max-h-[450px] overflow-y-auto pr-1">
+                        {textMsgs.map((msg) => {
+                          const isLoading = regeneratingMsgId === msg.id;
+                          return (
+                            <div key={msg.id} className="rounded-lg border border-zinc-800/60 p-3.5 space-y-2 bg-zinc-950/60">
+                              <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-[10px] text-zinc-300 capitalize">{msg.voiceName}</span>
+                                    <span className="text-[8px] text-zinc-500">Msg #{msg.id}</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <div className="space-y-0.5">
+                                      <Label className="text-[8px] text-zinc-450">Texto na Tela</Label>
+                                      <Input
+                                        className="text-xs h-7 bg-zinc-950 border-zinc-850 text-zinc-300"
+                                        value={msg.text}
+                                        onChange={(e) => updateTextMessage(msg.id, { text: e.target.value })}
+                                      />
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      <Label className="text-[8px] text-zinc-450">Texto Falado (TTS Override)</Label>
+                                      <Input
+                                        className="text-xs h-7 bg-zinc-950 border-zinc-850 text-zinc-300 font-mono"
+                                        placeholder="Ex: [risadas] Olá!"
+                                        value={msg.spokenText ?? ""}
+                                        onChange={(e) => updateTextMessage(msg.id, { spokenText: e.target.value || undefined })}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {(useDirector || ttsProvider === "omnivoice" || ttsProvider === "qwen3") && (
+                                    <div className="space-y-0.5">
+                                      <Label className="text-[8px] text-zinc-450">Instruções de Tom de Voz</Label>
+                                      <Input
+                                        className="text-xs h-7 bg-zinc-950 border-zinc-850 text-zinc-350"
+                                        placeholder="female, low pitch, whisper..."
+                                        value={msg.instruct ?? ""}
+                                        onChange={(e) => updateTextMessage(msg.id, { instruct: e.target.value || undefined })}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isLoading || !msg.voiceName.trim() || !msg.text.trim()}
+                                  onClick={() => regenerateOneAudio(msg.id)}
+                                  className="h-8 w-8 p-0 border-zinc-800 hover:bg-zinc-900 text-zinc-400 hover:text-white shrink-0 mt-3"
+                                >
+                                  {isLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-purple-450" />
+                                  ) : (
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                              </div>
+                              {msg.audioUrl && (
+                                <audio controls src={msg.audioUrl} className="h-7 w-full mt-2 filter invert opacity-80" />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            </>
-          )}
-        </div>
+                })()}
 
-        {imageMessages.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="font-semibold flex items-center gap-2">
-              <ImageIcon className="h-4 w-4" /> Images
-            </h2>
-            {imageMessages.map((m) => (
-              <div
-                key={m.id}
-                className="space-y-2 rounded-md border p-3"
-                tabIndex={0}
-                onPaste={(e) => {
-                  const items = e.clipboardData?.items;
-                  if (!items) return;
-                  for (const it of Array.from(items)) {
-                    if (it.type.startsWith("image/")) {
-                      const file = it.getAsFile();
-                      if (file) {
-                        e.preventDefault();
-                        onUploadImage(m.id, file);
-                        return;
-                      }
-                    }
-                  }
-                  const text = e.clipboardData?.getData("text");
-                  if (text && /^https?:\/\//i.test(text.trim())) {
-                    e.preventDefault();
-                    setImageUrlFor(m.id, text.trim());
-                  }
-                }}
-              >
-                <div className="text-xs text-muted-foreground">
-                  Side {m.side} — “{m.text}”
-                </div>
-                <div className="flex gap-2 items-center">
-                  <Link2 className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Cole URL ou imagem aqui (Ctrl/Cmd+V)"
-                    value={m.imageUrl?.startsWith("blob:") ? "" : m.imageUrl ?? ""}
-                    onChange={(e) => setImageUrlFor(m.id, e.target.value || null)}
-                  />
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    ref={(el) => {
-                      fileInputRefs.current[`${activeChatId}_${m.id}`] = el;
-                    }}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) onUploadImage(m.id, f);
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
-                  >
-                    <Upload className="mr-2 h-3 w-3" /> Upload
-                  </Button>
-                  {m.imageUrl && (
-                    <>
-                      <img
-                        src={m.imageUrl}
-                        alt={m.text}
-                        className="h-12 w-12 object-cover rounded-md border"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setImageUrlFor(m.id, null)}
-                      >
-                        Clear
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {videoMessages.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="font-semibold flex items-center gap-2">
-              <Video className="h-4 w-4" /> Videos
-            </h2>
-            {videoMessages.map((m) => (
-              <div
-                key={m.id}
-                className="space-y-2 rounded-md border p-3"
-                tabIndex={0}
-                onPaste={(e) => {
-                  const items = e.clipboardData?.items;
-                  if (!items) return;
-                  for (const it of Array.from(items)) {
-                    if (it.type.startsWith("video/") || it.type.startsWith("image/gif")) {
-                      const file = it.getAsFile();
-                      if (file) {
-                        e.preventDefault();
-                        onUploadVideo(m.id, file);
-                        return;
-                      }
-                    }
-                  }
-                  const text = e.clipboardData?.getData("text");
-                  if (text && /^https?:\/\//i.test(text.trim())) {
-                    e.preventDefault();
-                    setVideoUrlFor(m.id, text.trim());
-                  }
-                }}
-              >
-                <div className="text-xs text-muted-foreground">
-                  Side {m.side} — “{m.text}”
-                </div>
-                <div className="flex gap-2 items-center">
-                  <Link2 className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Cole URL de vídeo ou GIF aqui (Ctrl/Cmd+V)"
-                    value={m.videoUrl?.startsWith("blob:") ? "" : m.videoUrl ?? ""}
-                    onChange={(e) => setVideoUrlFor(m.id, e.target.value || null)}
-                  />
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    ref={(el) => {
-                      fileInputRefs.current[`${activeChatId}_${m.id}`] = el;
-                    }}
-                    type="file"
-                    accept="video/mp4,video/webm,image/gif"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) onUploadVideo(m.id, f);
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => fileInputRefs.current[`${activeChatId}_${m.id}`]?.click()}
-                  >
-                    <Upload className="mr-2 h-3 w-3" /> Upload
-                  </Button>
-                  {m.videoUrl && (
-                    <>
-                      {m.videoType === "gif" ? (
-                        <img
-                          src={m.videoUrl}
-                          alt={m.text}
-                          className="h-12 w-12 object-cover rounded-md border"
-                        />
-                      ) : (
-                        <video
-                          src={m.videoUrl}
-                          className="h-12 w-12 object-cover rounded-md border"
-                        />
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setVideoUrlFor(m.id, null)}
-                      >
-                        Clear
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <Button
-            onClick={() => playAnimation()}
-            disabled={!allAudiosReady || playing || recording}
-            className="flex-1"
-            size="lg"
-          >
-            <Play className="mr-2 h-4 w-4" />
-            Play vídeo (todos os chats)
-          </Button>
-        </div>
-        </div>
-
-      {/* RIGHT */}
-      <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 min-h-screen bg-background gap-4">
-        <div className="relative aspect-[9/16] w-full max-w-[400px]">
-        <div
-          ref={previewRef}
-          className="w-full h-full flex items-center justify-center relative overflow-hidden"
-          style={{
-            background: activeBackground.startsWith("data:image")
-              ? `url(${activeBackground}) center/cover no-repeat`
-              : activeBackground,
-          }}
-          onWheel={(e) => {
-            if (recording) return;
-            const outer = chatOuterRef.current?.clientHeight ?? 0;
-            const inner = chatInnerRef.current?.scrollHeight ?? 0;
-            const max = Math.max(0, inner - outer);
-            setPreviewDragOffset((prev) => {
-              let next = prev + e.deltaY;
-              if (next < 0) next = 0;
-              if (next > max) next = max;
-              return next;
-            });
-          }}
-        >
-        <div
-          className="w-[92%] h-fit max-h-[65%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0"
-          style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
-        >
-          {/* Header */}
-          <div className="shrink-0 z-10 w-full">
-          {isWA ? (
-            <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
-              <ChevronLeft className="h-6 w-6 text-[#0A84FF]" />
-              {displayChat.contactPhoto ? (
-                <img
-                  src={displayChat.contactPhoto}
-                  alt={displayChat.contactName}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-500 flex items-center justify-center text-white text-sm font-medium">
-                  <User className="h-6 w-6 text-white/80" />
-                </div>
-              )}
-              <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-[17px] font-semibold truncate leading-tight">
-                  {displayChat.contactName}
-                </span>
-                <span className="text-[12px] text-[#8696a0] leading-tight">
-                  {effectiveGroupChat ? (
-                    <input
-                      value={displayChat.groupSubtitle ?? "tap here for group info"}
-                      onChange={(e) =>
-                        updateChatById(displayChat.id, { groupSubtitle: e.target.value })
-                      }
-                      className="bg-transparent border-none outline-none text-[12px] text-[#8696a0] w-full p-0"
-                    />
-                  ) : (
-                    "Online"
-                  )}
-                </span>
-              </div>
-              <Video className="h-6 w-6 text-[#0A84FF]" strokeWidth={2} />
-              <Phone className="h-5 w-5 text-[#0A84FF] ml-2" strokeWidth={2} />
-            </div>
-          ) : (
-            <div className="relative bg-black px-4 pt-3 pb-4">
-              <div className="flex items-center gap-1 text-[#0A84FF] absolute left-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full pl-1 pr-3 py-1">
-                <ChevronLeft className="h-5 w-5" />
-                <input
-                  value={displayChat.headerTime}
-                  onChange={(e) =>
-                    updateChatById(displayChat.id, { headerTime: e.target.value })
-                  }
-                  className="bg-transparent border-none outline-none text-sm w-12 text-white p-0"
-                />
-              </div>
-              <div className="flex flex-col items-center mx-auto w-fit">
-                {effectiveGroupChat ? (
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center">
-                    <Users className="h-7 w-7 text-white" />
+                {/* Biblioteca de áudios gerados */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-850">
+                    <h3 className="font-semibold text-xs text-zinc-200">Biblioteca de Áudios ({generatedAudios.length})</h3>
                   </div>
-                ) : displayChat.contactPhoto ? (
-                  <img
-                    src={displayChat.contactPhoto}
-                    alt={displayChat.contactName}
-                    className="w-14 h-14 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center text-white text-xl font-semibold">
-                    {displayChat.contactName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <div className="mt-1 flex items-center gap-1 bg-[#1c1c1e] rounded-full px-3 py-1">
-                  <span className="text-white text-[15px] font-semibold">{displayChat.contactName}</span>
-                  <span className="text-[#8e8e93] text-sm">›</span>
-                </div>
-              </div>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full p-2">
-                <Video className="h-5 w-5 text-white" />
-              </div>
-            </div>
-          )}
-          </div>
-
-          {/* Chat */}
-          <div
-            ref={(el) => {
-              chatOuterRef.current = el;
-              chatScrollRef.current = el;
-            }}
-            className="w-full relative overflow-hidden flex-shrink min-h-0"
-            style={{
-              ...(isWA
-                ? {
-                    backgroundImage:
-                      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.04' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
-                    backgroundRepeat: "repeat",
-                  }
-                : {}),
-            }}
-          >
-            <div
-              ref={chatInnerRef}
-              className="w-full flex flex-col justify-start pl-1.5 pr-2.5 py-3 gap-0"
-              style={{
-                transform: `translateY(-${exportScroll + (recording ? 0 : previewDragOffset)}px)`,
-              }}
-            >
-            <AnimatePresence>
-              {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
-                if (recording && playing && idx < exportStartIndex) {
-                  const msgChatId = (m as any).chatId || displayChat.id;
-                  const chatMeas = exportMeasurements[msgChatId] || [];
-                  const meas = chatMeas[idx] || { height: 50, margin: 0 };
-                  return <div key={m.id} style={{ height: meas.height, marginBottom: meas.margin, flexShrink: 0 }} />;
-                }
-
-                const isLastSent =
-                  m.side === "2" &&
-                  !arr.slice(idx + 1).some((n) => n.side === "2");
-                const prev = arr[idx - 1];
-                const getSenderName = (msg: Msg, index: number) => {
-                  let name = "";
-                  if (msg.type === "text") name = msg.displayName || msg.voiceName;
-                  else if (msg.type === "image" || msg.type === "video") name = msg.displayName || msg.voiceName || "";
-                  
-                  // Fallback for loaded projects without voiceName on media
-                  if (!name) {
-                    for (let i = index - 1; i >= 0; i--) {
-                      const p = arr[i];
-                      if (p.side === msg.side && p.type === "text") {
-                        return p.displayName || p.voiceName || "";
-                      }
-                    }
-                  }
-                  return name;
-                };
-                const senderName = getSenderName(m, idx);
-                const prevSenderName = prev ? getSenderName(prev, idx - 1) : "";
-
-                const isLeftSide = effectiveGroupChat ? (m.side !== "2") : (m.side === "1");
-
-                // Sequence checks for Group Chat (side "1")
-                const isFirstInSequence = (() => {
-                  if (!isLeftSide) return false;
-                  const pMsg = arr[idx - 1];
-                  if (!pMsg) return true; // First message overall
-                  
-                  const pMsgLeftSide = effectiveGroupChat ? (pMsg.side !== "2") : (pMsg.side === "1");
-                  if (!pMsgLeftSide) return true; // Previous message was from side 2
-                  
-                  const currentSender = getSenderName(m, idx);
-                  const prevSender = pMsg ? getSenderName(pMsg, idx - 1) : "";
-                  return currentSender !== prevSender;
-                })();
-
-                const isLastInSequence = (() => {
-                  if (!isLeftSide) return false;
-                  const next = arr[idx + 1];
-                  if (!next) return true; // Last message overall
-                  
-                  const nextLeftSide = effectiveGroupChat ? (next.side !== "2") : (next.side === "1");
-                  if (!nextLeftSide) return true; // Next message is on side 2
-                  
-                  const currentSender = getSenderName(m, idx);
-                  const nextSender = next ? getSenderName(next, idx + 1) : "";
-                  return currentSender !== nextSender;
-                })();
-
-                const isLastInSequenceRight = (() => {
-                  if (m.side !== "2") return false;
-                  const next = arr[idx + 1];
-                  if (!next) return true;
-                  return next.side !== "2";
-                })();
-
-                const showName =
-                  effectiveGroupChat &&
-                  isLeftSide &&
-                  isFirstInSequence;
-
-                const nameColor =
-                  senderName
-                    ? displayChat.nameColors?.[senderName] || ""
-                    : "";
-
-                const showAvatarPlaceholder = effectiveGroupChat && isLeftSide;
-                const avatarUrl = showAvatarPlaceholder && senderName ? (displayChat.characterPhotos?.[senderName] || "") : "";
-                const charInitial = senderName ? senderName.charAt(0).toUpperCase() : "";
-
-                const showAvatar = isLastInSequence && effectiveGroupChat;
-
-                const isEndOfBlock = (() => {
-                  const next = arr[idx + 1];
-                  if (!next) return true; // Last message overall
-                  if (next.side !== m.side) return true; // Switches sides (left/right)
-                  
-                  // Same side. If it's the left side, check if the sender name changed.
-                  if (isLeftSide) {
-                    const currentSender = getSenderName(m, idx);
-                    const nextSender = next ? getSenderName(next, idx + 1) : "";
-                    return currentSender !== nextSender;
-                  }
-                  return false;
-                })();
-
-                const spacingClass = isEndOfBlock ? "mb-3.5" : "mb-0.5";
-
-                const renderBubble = () => {
-                  if (m.type === "text") {
-                    if (isWA) {
-                      const bubbleSideClass = m.side === "2"
-                        ? `bg-[#005c4b] ml-auto ${isLastInSequenceRight ? "rounded-lg rounded-tr-none wa-tail-right" : "rounded-lg"}`
-                        : `bg-[#262d31] ${isLastInSequence ? "rounded-lg rounded-tl-none wa-tail-left" : "rounded-lg"}`;
-                      return (
-                        <div className={`relative max-w-[80%] py-1.5 px-2.5 text-white text-[15px] leading-snug shadow-sm ${bubbleSideClass}`}>
-                          {showName && (
-                            <span
-                              className="text-[13px] font-bold mb-0.5 capitalize block"
-                              style={{ color: nameColor || "#53bdeb" }}
-                            >
-                              {senderName}
-                            </span>
-                          )}
-                          {renderCensored(m.text)}
-                        </div>
-                      );
-                    } else {
-                      const bubbleSideClass = m.side === "2"
-                        ? `bg-[#0A84FF] rounded-2xl ${isLastInSequenceRight ? "im-tail-right" : ""}`
-                        : `bg-[#262628] rounded-2xl ${isLastInSequence ? "im-tail-left" : ""}`;
-                      return (
-                        <div className={`relative max-w-[80%] px-3 py-2 text-white text-[15px] leading-snug ${bubbleSideClass}`}>
-                          {renderCensored(m.text)}
-                        </div>
-                      );
-                    }
-
-
-                  } else if (m.type === "image") {
-                    if (m.imageUrl) {
-                      if (isWA) {
-                        return (
-                          <div
-                            className={`p-1 rounded-lg ${
-                              m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
-                            }`}
-                          >
-                            {showName && (
-                              <span
-                                className="text-[13px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
-                                style={{ color: nameColor || "#53bdeb" }}
-                              >
-                                {senderName}
-                              </span>
-                            )}
-                            <img
-                              src={m.imageUrl}
-                              alt={m.text}
-                              className="max-w-[240px] max-h-56 object-cover rounded-md"
-                            />
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <img
-                            src={m.imageUrl}
-                            alt={m.text}
-                            className="max-w-[70%] max-h-56 object-cover rounded-2xl"
-                          />
-                        );
-                      }
-                    } else {
-                      return (
-                        <div className={`h-32 w-48 rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
-                          isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
-                        }`}>
-                          <ImageIcon className="h-8 w-8" />
-                          <span className="text-center">{m.text}</span>
-                        </div>
-                      );
-                    }
-                  } else if (m.type === "video") {
-                    if (m.videoUrl) {
-                      const isGif = m.videoType === "gif";
-                      if (isWA) {
-                        return (
-                          <div
-                            className={`p-1 rounded-lg ${
-                              m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"
-                            }`}
-                          >
-                            {showName && (
-                              <span
-                                className="text-[13px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
-                                style={{ color: nameColor || "#53bdeb" }}
-                              >
-                                {senderName}
-                              </span>
-                            )}
-                            {isGif ? (
-                              <img
-                                src={m.videoUrl}
-                                alt={m.text}
-                                className="max-w-[240px] max-h-[180px] object-cover rounded-md"
-                              />
-                            ) : (
-                              <VideoBubble
-                                src={m.videoUrl}
-                                recording={recording}
-                                className="max-w-[240px] max-h-[180px] object-cover rounded-md"
-                                msgId={m.id}
-                                chatId={displayChat.id}
-                              />
-                            )}
-                          </div>
-                        );
-                      } else {
-                        return isGif ? (
-                          <img
-                            src={m.videoUrl}
-                            alt={m.text}
-                            className="max-w-[240px] max-h-[180px] object-cover rounded-2xl"
-                          />
-                        ) : (
-                          <VideoBubble
-                            src={m.videoUrl}
-                            recording={recording}
-                            className="max-w-[240px] max-h-[180px] object-cover rounded-2xl"
-                            msgId={m.id}
-                            chatId={displayChat.id}
-                          />
-                        );
-                      }
-                    } else {
-                      return (
-                        <div className={`w-[240px] h-[180px] rounded-2xl flex flex-col items-center justify-center text-xs gap-2 p-2 ${
-                          isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-300"
-                        }`}>
-                          <Video className="h-8 w-8" />
-                          <span className="text-center truncate max-w-full px-2">{m.text}</span>
-                        </div>
-                      );
-                    }
-                  }
-                };
-
-                return (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: recording ? 0 : 0.3 }}
-                  className={`flex flex-col ${spacingClass} ${
-                    m.side === "2" ? "items-end" : "items-start"
-                  } ${!effectiveGroupChat && m.side === "1" ? "pl-2" : ""}`}
-                >
-
-                  {!isWA && showName && (
-                    <span
-                      className="text-[11px] mb-0.5 capitalize block"
-                      style={{
-                        color: nameColor || "#8e8e93",
-                        marginLeft: showAvatarPlaceholder ? "36px" : "12px",
-                      }}
-                    >
-                      {senderName}
-                    </span>
-                  )}
-                  {showAvatarPlaceholder ? (
-                    <div className="flex flex-row items-end gap-1 w-full">
-                      <div className="w-7 h-7 flex-shrink-0 flex items-center justify-center select-none relative z-10">
-
-                        {showAvatar && (
-                          avatarUrl ? (
-                            <img
-                              src={avatarUrl}
-                              alt={senderName}
-                              className="w-7 h-7 rounded-full object-cover border border-zinc-700/50"
-                            />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 flex items-center justify-center text-white text-[10px] font-semibold uppercase border border-zinc-700/50">
-                              {charInitial}
-                            </div>
-                          )
-                        )}
-                      </div>
-                      {renderBubble()}
+                  {generatedAudios.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-zinc-850 p-6 text-center text-zinc-500 text-xs">
+                      Nenhum áudio gerado nesta sessão ainda.
                     </div>
                   ) : (
-                    renderBubble()
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                      {generatedAudios.map((g, idx) => {
+                        const isLinked = activeChat.messages.some(
+                          (m) => m.type === "text" && m.audioUrl === g.audioUrl
+                        );
+                        return (
+                          <div key={idx} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2 text-xs">
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="font-bold text-zinc-300 capitalize">{g.voiceName}</span>
+                              <span className={`px-2 py-0.5 rounded text-[8px] font-medium ${isLinked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25" : "bg-zinc-800 text-zinc-400"}`}>
+                                {isLinked ? "Vinculado" : "Não Vinculado"}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-zinc-400 italic truncate font-sans">“{g.text}”</p>
+                            <audio src={g.audioUrl} controls className="h-6 w-full filter invert opacity-75 mt-1" />
+                            <div className="flex gap-2 pt-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-[9px] h-6 px-2 flex-1"
+                                disabled={isLinked}
+                                onClick={() => {
+                                  let bound = false;
+                                  const updatedMessages = activeChat.messages.map((m) => {
+                                    if (
+                                      m.type === "text" &&
+                                      !m.audioUrl &&
+                                      m.voiceName.toLowerCase() === g.voiceName.toLowerCase() &&
+                                      m.text.toLowerCase() === g.text.toLowerCase()
+                                    ) {
+                                      bound = true;
+                                      return { ...m, audioUrl: g.audioUrl };
+                                    }
+                                    return m;
+                                  });
+                                  if (bound) {
+                                    updateActiveChat({ messages: updatedMessages });
+                                  } else {
+                                    const textMsgsWithoutAudio = activeChat.messages.filter(
+                                      (m): m is TextMsg => m.type === "text" && !m.audioUrl
+                                    );
+                                    if (textMsgsWithoutAudio.length === 0) return;
+                                    const candidate = textMsgsWithoutAudio.find(
+                                      (m) => m.voiceName.toLowerCase() === g.voiceName.toLowerCase()
+                                    ) || textMsgsWithoutAudio[0];
+                                    const updated = activeChat.messages.map((m) =>
+                                      m.id === candidate.id && m.type === "text"
+                                        ? { ...m, audioUrl: g.audioUrl }
+                                        : m
+                                    );
+                                    updateActiveChat({ messages: updated });
+                                  }
+                                }}
+                              >
+                                Vincular ao Script
+                              </Button>
+                              <button
+                                onClick={() => setGeneratedAudios((prev) => prev.filter((_, i) => i !== idx))}
+                                className="text-[9px] text-red-400 hover:text-red-350 px-2 transition"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
-
-                </motion.div>
-              );})}
-            </AnimatePresence>
-          </div>
-        </div>
-        </div>
-        {!recording && (
-          <div
-            data-preview-only="true"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1 select-none cursor-ns-resize px-4 py-2 rounded-full bg-black/40 backdrop-blur-sm text-white/90 text-xs"
-            onPointerDown={(e) => {
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              dragStateRef.current = { startY: e.clientY, startOffset: previewDragOffset };
-            }}
-            onPointerMove={(e) => {
-              if (!dragStateRef.current) return;
-              const dy = e.clientY - dragStateRef.current.startY;
-              let next = dragStateRef.current.startOffset - dy;
-              const outer = chatOuterRef.current?.clientHeight ?? 0;
-              const inner = chatInnerRef.current?.scrollHeight ?? 0;
-              const max = Math.max(0, inner - outer);
-              if (next < 0) next = 0;
-              if (next > max) next = max;
-              setPreviewDragOffset(next);
-            }}
-            onPointerUp={(e) => {
-              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-              dragStateRef.current = null;
-            }}
-          >
-            <div className="w-10 h-1 rounded-full bg-white/70" />
-            <span>Arraste para rolar</span>
-          </div>
-        )}
-        {!recording && (() => {
-          const outer = chatOuterRef.current?.clientHeight ?? 0;
-          const inner = chatInnerRef.current?.scrollHeight ?? 1;
-          const max = Math.max(1, inner - outer);
-          const ratio = Math.min(1, outer / inner);
-          const thumbPct = Math.max(0.08, ratio);
-          const offsetPct = max > 0 ? (previewDragOffset / max) * (1 - thumbPct) : 0;
-          return (
-            <div
-              data-preview-only="true"
-              className="absolute right-2 top-4 bottom-4 w-2 z-40 rounded-full bg-black/20 backdrop-blur-sm cursor-ns-resize select-none"
-              onPointerDown={(e) => {
-                const rail = e.currentTarget as HTMLElement;
-                rail.setPointerCapture(e.pointerId);
-                const rect = rail.getBoundingClientRect();
-                const update = (clientY: number) => {
-                  const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
-                  const pct = y / rect.height;
-                  setPreviewDragOffset(pct * max);
-                };
-                update(e.clientY);
-                (rail as any)._update = update;
-              }}
-              onPointerMove={(e) => {
-                const u = (e.currentTarget as any)._update;
-                if (u) u(e.clientY);
-              }}
-              onPointerUp={(e) => {
-                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-                (e.currentTarget as any)._update = null;
-              }}
-            >
-              <div
-                className="absolute left-0 right-0 rounded-full bg-white/80"
-                style={{
-                  top: `${offsetPct * 100}%`,
-                  height: `${thumbPct * 100}%`,
-                }}
-              />
-            </div>
-          );
-        })()}
-        </div>
-          {recording && (
-            <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 px-6">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
-              <div className="text-white text-sm font-medium">
-                Rendering... {Math.round(exportProgress)}%
+                </div>
               </div>
-              <Progress
-                value={exportProgress}
-                className="w-full h-2 bg-white/20 [&>div]:bg-emerald-500"
-              />
-            </div>
-          )}
-          </div>
-          {/* YouTube-style Control Bar */}
-          {playing && !recording && (
-            <div
-              style={{ width: 400 }}
-              className="rounded-xl bg-black/80 backdrop-blur-md border border-white/10 px-4 py-3 flex flex-col gap-2"
-            >
-              {/* Progress Bar */}
+            )}
+
+            {/* SEÇÃO: EXPORTAÇÃO */}
+            {activeSection === "export" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">📥 Exportar Vídeo</h2>
+                  <p className="text-xs text-zinc-400">Configure limites de renderização e grave o vídeo do chat finalizado.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <Label className="text-xs text-zinc-350">Gravar a partir do índice</Label>
+                    <Input
+                      type="number"
+                      value={exportStartIndex}
+                      onChange={(e) => setExportStartIndex(Number(e.target.value) || 0)}
+                      className="bg-zinc-950 border-zinc-800 text-xs h-8"
+                    />
+                    <p className="text-[9px] text-zinc-450 leading-tight">
+                      Grave a partir de uma mensagem específica para acelerar testes. (0 = início do chat).
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <Label className="text-xs text-zinc-350">Altura do scroll ajustada (px)</Label>
+                    <Input
+                      type="number"
+                      value={exportScroll}
+                      onChange={(e) => setExportScroll(Number(e.target.value) || 0)}
+                      className="bg-zinc-950 border-zinc-800 text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-3">
+                  <Button
+                    onClick={() => exportVideoFast(false)}
+                    disabled={!allAudiosReady || playing || recording}
+                    size="lg"
+                    className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs h-12 shadow-lg shadow-purple-600/10"
+                  >
+                    {recording ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Gravando vídeo... {Math.round(exportProgress)}%
+                      </>
+                    ) : (
+                      <>
+                        <Download className="mr-2 h-4 w-4" />
+                        Exportar Vídeo (Chat Ativo) 🎬
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={() => exportVideoFast(true)}
+                    disabled={!allAudiosReady || playing || recording}
+                    size="lg"
+                    className="w-full text-xs h-11"
+                    variant="outline"
+                  >
+                    Exportar Vídeo (Todos os Chats)
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO: CONFIGURAÇÕES AVANÇADAS */}
+            {activeSection === "settings" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">⚙️ Configurações Avançadas</h2>
+                  <p className="text-xs text-zinc-400">Configure chaves de API, portas de rede e atrasos finos de áudio.</p>
+                </div>
+
+                {/* Atrasos e velocidades básicas */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-300">Message Delay (ms)</Label>
+                      <Input
+                        type="number"
+                        step={50}
+                        value={messageDelay}
+                        onChange={(e) => setMessageDelay(Number(e.target.value) || 0)}
+                        className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
+                      />
+                      <p className="text-[9px] text-zinc-450">
+                        Atraso entre o áudio de uma mensagem e o aparecimento da próxima.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-300">Voice Speed</Label>
+                        <span className="text-xs font-mono text-purple-400">{voiceSpeed.toFixed(2)}x</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={0.5}
+                        max={2}
+                        step={0.05}
+                        value={voiceSpeed}
+                        onChange={(e) => setVoiceSpeed(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Provedor TTS e APIs */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-zinc-300">Provedor de Voz (TTS)</Label>
+                    <select
+                      className="w-full h-9 rounded border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                      value={ttsProvider}
+                      onChange={(e) => setTtsProvider(e.target.value as any)}
+                    >
+                      <option value="elevenlabs">ElevenLabs (Nuvem / API Key)</option>
+                      <option value="omnivoice">OmniVoice Local (Gratuito / GPU)</option>
+                      <option value="qwen3">Qwen3-TTS Local (1.7B / GPU)</option>
+                    </select>
+                  </div>
+
+                  {ttsProvider === "elevenlabs" ? (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-300">ElevenLabs API Key</Label>
+                      <Input
+                        type="password"
+                        value={elevenKey}
+                        onChange={(e) => setElevenKey(e.target.value)}
+                        placeholder="sk_..."
+                        className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-3 pt-2 border-t border-zinc-800/40">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-zinc-300">URL do Servidor Local</Label>
+                        <Input
+                          type="text"
+                          value={omniVoiceUrl}
+                          onChange={(e) => setOmniVoiceUrl(e.target.value)}
+                          placeholder="http://localhost:8000"
+                          className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-xs h-9 border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900"
+                        onClick={async () => {
+                          try {
+                            const res = await startOmniVoiceServerFn();
+                            if ((res as any).success) {
+                              alert("Comando enviado! O terminal do servidor se abrirá em breve.");
+                            } else {
+                              alert(`Erro ao abrir: ${(res as any).error}`);
+                            }
+                          } catch (err) {
+                            alert(`Erro: ${(err as Error).message}`);
+                          }
+                        }}
+                      >
+                        Iniciar Servidor de Voz Local (python tts_server.py)
+                      </Button>
+
+                      {/* Parâmetros avançados OmniVoice */}
+                      {ttsProvider === "omnivoice" && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-850">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-[10px] text-zinc-400">Diffusion Steps (Qualidade)</Label>
+                              <span className="text-[10px] text-zinc-400 font-mono">{omniNumStep}</span>
+                            </div>
+                            <Input
+                              type="range"
+                              min={16}
+                              max={128}
+                              step={8}
+                              value={omniNumStep}
+                              onChange={(e) => setOmniNumStep(Number(e.target.value))}
+                              className="h-6 cursor-pointer"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-[10px] text-zinc-400">CFG Scale (Expressividade)</Label>
+                              <span className="text-[10px] text-zinc-400 font-mono">{omniGuidanceScale.toFixed(1)}</span>
+                            </div>
+                            <Input
+                              type="range"
+                              min={1.0}
+                              max={4.0}
+                              step={0.1}
+                              value={omniGuidanceScale}
+                              onChange={(e) => setOmniGuidanceScale(Number(e.target.value))}
+                              className="h-6 cursor-pointer"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Diretor de Emoções IA */}
+                <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="use-director" className="text-xs text-zinc-300 font-medium cursor-pointer">
+                      Usar Diretor de Emoções (IA)
+                    </Label>
+                    <input
+                      id="use-director"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-zinc-800 text-purple-600 focus:ring-purple-600 bg-zinc-950 cursor-pointer"
+                      checked={useDirector}
+                      onChange={(e) => setUseDirector(e.target.checked)}
+                    />
+                  </div>
+
+                  {useDirector && (
+                    <div className="space-y-3 bg-zinc-950/40 p-4 border border-zinc-850 rounded-lg">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-zinc-400">Provedor IA</Label>
+                        <select
+                          className="w-full h-8 rounded border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                          value={directorLlmProvider}
+                          onChange={(e) => setDirectorLlmProvider(e.target.value as any)}
+                        >
+                          <option value="gemini">Gemini (Google AI Studio - Chave Grátis)</option>
+                          <option value="openai">OpenAI (Pago)</option>
+                          <option value="local">LLM Local (Ollama / LM Studio)</option>
+                        </select>
+                      </div>
+
+                      {directorLlmProvider === "gemini" && (
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-zinc-400">Gemini API Key</Label>
+                          <Input
+                            type="password"
+                            className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                            value={geminiApiKey}
+                            onChange={(e) => setGeminiApiKey(e.target.value)}
+                            placeholder="AIzaSy..."
+                          />
+                        </div>
+                      )}
+
+                      {directorLlmProvider === "openai" && (
+                        <div className="space-y-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-zinc-400">OpenAI API Key</Label>
+                            <Input
+                              type="password"
+                              className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                              value={openaiApiKey}
+                              onChange={(e) => setOpenaiApiKey(e.target.value)}
+                              placeholder="sk-proj-..."
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-zinc-400">Modelo OpenAI</Label>
+                            <Input
+                              type="text"
+                              className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                              value={openaiModel}
+                              onChange={(e) => setOpenaiModel(e.target.value)}
+                              placeholder="gpt-4o-mini"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {directorLlmProvider === "local" && (
+                        <div className="space-y-2">
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-zinc-400">URL do Servidor Local LLM (Base URL)</Label>
+                            <Input
+                              type="text"
+                              className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                              value={localLlmUrl}
+                              onChange={(e) => setLocalLlmUrl(e.target.value)}
+                              placeholder="Ex: http://localhost:11434/v1 ou http://localhost:1234/v1"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-zinc-400">Nome do Modelo Local (ex: gemma2)</Label>
+                            <Input
+                              type="text"
+                              className="h-8 text-xs bg-zinc-950 border-zinc-800 text-zinc-200"
+                              value={localLlmModel}
+                              onChange={(e) => setLocalLlmModel(e.target.value)}
+                              placeholder="Ex: gemma2, llama3, qwen2.5:7b"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* 3. STICKY PREVIEW DO CELULAR */}
+          <section className="hidden lg:flex w-[450px] shrink-0 border-l border-zinc-850 bg-zinc-900/10 p-6 flex-col justify-center items-center sticky top-0 h-full overflow-hidden">
+            <div className="relative aspect-[9/16] w-full max-w-[370px]">
               <div
-                className="group relative w-full h-2 bg-white/15 rounded-full cursor-pointer hover:h-3 transition-all"
+                ref={previewRef}
+                className="w-full h-full flex items-center justify-center relative overflow-hidden"
+                style={{
+                  background: activeBackground.startsWith("data:image")
+                    ? `url(${activeBackground}) center/cover no-repeat`
+                    : activeBackground,
+                }}
+                onWheel={(e) => {
+                  if (recording) return;
+                  const outer = chatOuterRef.current?.clientHeight ?? 0;
+                  const inner = chatInnerRef.current?.scrollHeight ?? 0;
+                  const max = Math.max(0, inner - outer);
+                  setPreviewDragOffset((prev) => {
+                    let next = prev + e.deltaY;
+                    if (next < 0) next = 0;
+                    if (next > max) next = max;
+                    return next;
+                  });
+                }}
+              >
+                <div
+                  className="w-[92%] h-fit max-h-[68%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800"
+                  style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
+                >
+                  {/* Header */}
+                  <div className="shrink-0 z-10 w-full">
+                    {isWA ? (
+                      <div className="bg-[#1f2c34] text-white flex items-center px-3 py-2.5 gap-3 z-10">
+                        <ChevronLeft className="h-5 w-5 text-[#0A84FF] shrink-0" />
+                        {displayChat.contactPhoto ? (
+                          <img
+                            src={displayChat.contactPhoto}
+                            alt={displayChat.contactName}
+                            className="w-9 h-9 rounded-full object-cover border border-zinc-800"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-500 to-zinc-650 flex items-center justify-center text-white text-xs font-semibold shrink-0">
+                            {displayChat.contactName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <span className="text-sm font-semibold truncate leading-tight">
+                            {displayChat.contactName}
+                          </span>
+                          <span className="text-[10px] text-[#8696a0] leading-tight">
+                            {effectiveGroupChat ? (
+                              <input
+                                value={displayChat.groupSubtitle ?? "tap here for group info"}
+                                onChange={(e) =>
+                                  updateChatById(displayChat.id, { groupSubtitle: e.target.value })
+                                }
+                                className="bg-transparent border-none outline-none text-[10px] text-[#8696a0] w-full p-0"
+                              />
+                            ) : (
+                              "Online"
+                            )}
+                          </span>
+                        </div>
+                        <Video className="h-5 w-5 text-[#0A84FF] shrink-0" strokeWidth={2} />
+                        <Phone className="h-4.5 w-4.5 text-[#0A84FF] shrink-0 ml-1" strokeWidth={2} />
+                      </div>
+                    ) : (
+                      <div className="relative bg-black px-4 pt-3 pb-3 border-b border-zinc-900">
+                        <div className="flex items-center gap-1 text-[#0A84FF] absolute left-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full pl-1 pr-3 py-0.5">
+                          <ChevronLeft className="h-4 w-4" />
+                          <input
+                            value={displayChat.headerTime}
+                            onChange={(e) =>
+                              updateChatById(displayChat.id, { headerTime: e.target.value })
+                            }
+                            className="bg-transparent border-none outline-none text-xs w-9 text-white p-0 font-medium"
+                          />
+                        </div>
+                        <div className="flex flex-col items-center mx-auto w-fit">
+                          {effectiveGroupChat ? (
+                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center border border-zinc-800">
+                              <Users className="h-5 w-5 text-white" />
+                            </div>
+                          ) : displayChat.contactPhoto ? (
+                            <img
+                              src={displayChat.contactPhoto}
+                              alt={displayChat.contactName}
+                              className="w-11 h-11 rounded-full object-cover border border-zinc-800"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#7a7a99] to-[#3a3a5a] flex items-center justify-center text-white text-sm font-semibold border border-zinc-800">
+                              {displayChat.contactName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="mt-1 flex items-center gap-1 bg-[#1c1c1e] rounded-full px-2.5 py-0.5">
+                            <span className="text-white text-[13px] font-semibold">{displayChat.contactName}</span>
+                            <span className="text-[#8e8e93] text-xs">›</span>
+                          </div>
+                        </div>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#1c1c1e] rounded-full p-1.5 border border-zinc-850">
+                          <Video className="h-4 w-4 text-white" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Chat Message Scrollport */}
+                  <div
+                    ref={(el) => {
+                      chatOuterRef.current = el;
+                      chatScrollRef.current = el;
+                    }}
+                    className="w-full relative overflow-hidden flex-shrink min-h-[300px]"
+                    style={{
+                      ...(isWA
+                        ? {
+                            backgroundImage:
+                              "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1.2'><circle cx='30' cy='30' r='10'/><path d='M60 20 q5 10 10 0 t10 0'/><circle cx='110' cy='40' r='6'/><path d='M140 20 l8 8 l-8 8 l-8 -8 z'/><circle cx='160' cy='70' r='4'/><path d='M20 80 q10 -10 20 0 t20 0'/><circle cx='80' cy='100' r='8'/><path d='M120 90 l10 0 l-5 -10 z'/><circle cx='40' cy='140' r='5'/><path d='M70 150 q10 10 20 0 t20 0'/><circle cx='140' cy='130' r='10'/><path d='M170 160 l-10 0 l5 -10 z'/></g></svg>\")",
+                            backgroundRepeat: "repeat",
+                          }
+                        : {}),
+                    }}
+                  >
+                    <div
+                      ref={chatInnerRef}
+                      className="w-full flex flex-col justify-start pl-1.5 pr-2.5 py-3 gap-0"
+                      style={{
+                        transform: `translateY(-${exportScroll + (recording ? 0 : previewDragOffset)}px)`,
+                      }}
+                    >
+                      <AnimatePresence>
+                        {(playing ? visibleMessages : displayChat.messages).map((m, idx, arr) => {
+                          if (recording && playing && idx < exportStartIndex) {
+                            const msgChatId = (m as any).chatId || displayChat.id;
+                            const chatMeas = exportMeasurements[msgChatId] || [];
+                            const meas = chatMeas[idx] || { height: 50, margin: 0 };
+                            return <div key={m.id} style={{ height: meas.height, marginBottom: meas.margin, flexShrink: 0 }} />;
+                          }
+
+                          const isLastSent =
+                            m.side === "2" &&
+                            !arr.slice(idx + 1).some((n) => n.side === "2");
+                          const prev = arr[idx - 1];
+                          const getSenderName = (msg: Msg, index: number) => {
+                            let name = "";
+                            if (msg.type === "text") name = msg.displayName || msg.voiceName;
+                            else if (msg.type === "image" || msg.type === "video") name = msg.displayName || msg.voiceName || "";
+                            if (!name) {
+                              for (let i = index - 1; i >= 0; i--) {
+                                const p = arr[i];
+                                if (p.side === msg.side && p.type === "text") {
+                                  return p.displayName || p.voiceName || "";
+                                }
+                              }
+                            }
+                            return name;
+                          };
+
+                          const senderName = getSenderName(m, idx);
+                          const isLeftSide = effectiveGroupChat ? (m.side !== "2") : (m.side === "1");
+
+                          const isFirstInSequence = (() => {
+                            if (!isLeftSide) return false;
+                            const pMsg = arr[idx - 1];
+                            if (!pMsg) return true;
+                            const pMsgLeftSide = effectiveGroupChat ? (pMsg.side !== "2") : (pMsg.side === "1");
+                            if (!pMsgLeftSide) return true;
+                            const currentSender = getSenderName(m, idx);
+                            const prevSender = pMsg ? getSenderName(pMsg, idx - 1) : "";
+                            return currentSender !== prevSender;
+                          })();
+
+                          const isLastInSequence = (() => {
+                            if (!isLeftSide) return false;
+                            const next = arr[idx + 1];
+                            if (!next) return true;
+                            const nextLeftSide = effectiveGroupChat ? (next.side !== "2") : (next.side === "1");
+                            if (!nextLeftSide) return true;
+                            const currentSender = getSenderName(m, idx);
+                            const nextSender = next ? getSenderName(next, idx + 1) : "";
+                            return currentSender !== nextSender;
+                          })();
+
+                          const isLastInSequenceRight = (() => {
+                            if (m.side !== "2") return false;
+                            const next = arr[idx + 1];
+                            if (!next) return true;
+                            return next.side !== "2";
+                          })();
+
+                          const showName = effectiveGroupChat && isLeftSide && isFirstInSequence;
+                          const nameColor = senderName ? displayChat.nameColors?.[senderName] || "" : "";
+                          const showAvatarPlaceholder = effectiveGroupChat && isLeftSide;
+                          const avatarUrl = showAvatarPlaceholder && senderName ? (displayChat.characterPhotos?.[senderName] || "") : "";
+                          const charInitial = senderName ? senderName.charAt(0).toUpperCase() : "";
+                          const showAvatar = isLastInSequence && effectiveGroupChat;
+
+                          const isEndOfBlock = (() => {
+                            const next = arr[idx + 1];
+                            if (!next) return true;
+                            if (next.side !== m.side) return true;
+                            if (isLeftSide) {
+                              const currentSender = getSenderName(m, idx);
+                              const nextSender = next ? getSenderName(next, idx + 1) : "";
+                              return currentSender !== nextSender;
+                            }
+                            return false;
+                          })();
+
+                          const spacingClass = isEndOfBlock ? "mb-3" : "mb-0.5";
+
+                          const renderBubble = () => {
+                            if (m.type === "text") {
+                              if (isWA) {
+                                const bubbleSideClass = m.side === "2"
+                                  ? `bg-[#005c4b] ml-auto ${isLastInSequenceRight ? "rounded-lg rounded-tr-none wa-tail-right" : "rounded-lg"}`
+                                  : `bg-[#262d31] ${isLastInSequence ? "rounded-lg rounded-tl-none wa-tail-left" : "rounded-lg"}`;
+                                return (
+                                  <div className={`relative max-w-[82%] py-1.5 px-2.5 text-white text-[14px] leading-snug shadow-sm ${bubbleSideClass}`}>
+                                    {showName && (
+                                      <span
+                                        className="text-[12px] font-bold mb-0.5 capitalize block"
+                                        style={{ color: nameColor || "#53bdeb" }}
+                                      >
+                                        {senderName}
+                                      </span>
+                                    )}
+                                    {renderCensored(m.text)}
+                                  </div>
+                                );
+                              } else {
+                                const bubbleSideClass = m.side === "2"
+                                  ? `bg-[#0A84FF] rounded-2xl ${isLastInSequenceRight ? "im-tail-right" : ""}`
+                                  : `bg-[#262628] rounded-2xl ${isLastInSequence ? "im-tail-left" : ""}`;
+                                return (
+                                  <div className={`relative max-w-[82%] px-3 py-1.5 text-white text-[14px] leading-snug ${bubbleSideClass}`}>
+                                    {renderCensored(m.text)}
+                                  </div>
+                                );
+                              }
+                            } else if (m.type === "image") {
+                              if (m.imageUrl) {
+                                if (isWA) {
+                                  return (
+                                    <div className={`p-1 rounded-lg ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}>
+                                      {showName && (
+                                        <span
+                                          className="text-[12px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                          style={{ color: nameColor || "#53bdeb" }}
+                                        >
+                                          {senderName}
+                                        </span>
+                                      )}
+                                      <img src={m.imageUrl} alt={m.text} className="max-w-[210px] max-h-48 object-cover rounded" />
+                                    </div>
+                                  );
+                                } else {
+                                  return (
+                                    <img src={m.imageUrl} alt={m.text} className="max-w-[70%] max-h-48 object-cover rounded-2xl" />
+                                  );
+                                }
+                              } else {
+                                return (
+                                  <div className={`h-24 w-40 rounded-2xl flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}>
+                                    <ImageIcon className="h-6 w-6" />
+                                    <span className="text-center line-clamp-2">{m.text}</span>
+                                  </div>
+                                );
+                              }
+                            } else if (m.type === "video") {
+                              if (m.videoUrl) {
+                                const isGif = m.videoType === "gif";
+                                if (isWA) {
+                                  return (
+                                    <div className={`p-1 rounded-lg ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}>
+                                      {showName && (
+                                        <span
+                                          className="text-[12px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                          style={{ color: nameColor || "#53bdeb" }}
+                                        >
+                                          {senderName}
+                                        </span>
+                                      )}
+                                      {isGif ? (
+                                        <img src={m.videoUrl} alt={m.text} className="max-w-[210px] max-h-[160px] object-cover rounded" />
+                                      ) : (
+                                        <VideoBubble
+                                          src={m.videoUrl}
+                                          recording={recording}
+                                          className="max-w-[210px] max-h-[160px] object-cover rounded"
+                                          msgId={m.id}
+                                          chatId={displayChat.id}
+                                        />
+                                      )}
+                                    </div>
+                                  );
+                                } else {
+                                  return isGif ? (
+                                    <img src={m.videoUrl} alt={m.text} className="max-w-[210px] max-h-[160px] object-cover rounded-2xl" />
+                                  ) : (
+                                    <VideoBubble
+                                      src={m.videoUrl}
+                                      recording={recording}
+                                      className="max-w-[210px] max-h-[160px] object-cover rounded-2xl"
+                                      msgId={m.id}
+                                      chatId={displayChat.id}
+                                    />
+                                  );
+                                }
+                              } else {
+                                return (
+                                  <div className={`w-[210px] h-[140px] rounded-2xl flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}>
+                                    <Video className="h-6 w-6" />
+                                    <span className="text-center truncate max-w-full px-2">{m.text}</span>
+                                  </div>
+                                );
+                              }
+                            }
+                          };
+
+                          return (
+                            <motion.div
+                              key={m.id}
+                              initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: recording ? 0 : 0.25 }}
+                              className={`flex flex-col ${spacingClass} ${
+                                m.side === "2" ? "items-end" : "items-start"
+                              } ${!effectiveGroupChat && m.side === "1" ? "pl-1.5" : ""}`}
+                            >
+                              {!isWA && showName && (
+                                <span
+                                  className="text-[10px] mb-0.5 capitalize block"
+                                  style={{
+                                    color: nameColor || "#8e8e93",
+                                    marginLeft: showAvatarPlaceholder ? "32px" : "10px",
+                                  }}
+                                >
+                                  {senderName}
+                                </span>
+                              )}
+                              {showAvatarPlaceholder ? (
+                                <div className="flex flex-row items-end gap-1.5 w-full">
+                                  <div className="w-6.5 h-6.5 flex-shrink-0 flex items-center justify-center select-none relative z-10">
+                                    {showAvatar && (
+                                      avatarUrl ? (
+                                        <img
+                                          src={avatarUrl}
+                                          alt={senderName}
+                                          className="w-6 h-6 rounded-full object-cover border border-zinc-800"
+                                        />
+                                      ) : (
+                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-zinc-600 to-zinc-850 flex items-center justify-center text-white text-[9px] font-semibold uppercase border border-zinc-800">
+                                          {charInitial}
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                  {renderBubble()}
+                                </div>
+                              ) : (
+                                renderBubble()
+                              )}
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </div>
+
+                {!recording && (
+                  <div
+                    data-preview-only="true"
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1 select-none cursor-ns-resize px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-md text-white/90 text-[10px] border border-white/5 shadow-lg"
+                    onPointerDown={(e) => {
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      dragStateRef.current = { startY: e.clientY, startOffset: previewDragOffset };
+                    }}
+                    onPointerMove={(e) => {
+                      if (!dragStateRef.current) return;
+                      const dy = e.clientY - dragStateRef.current.startY;
+                      let next = dragStateRef.current.startOffset - dy;
+                      const outer = chatOuterRef.current?.clientHeight ?? 0;
+                      const inner = chatInnerRef.current?.scrollHeight ?? 0;
+                      const max = Math.max(0, inner - outer);
+                      if (next < 0) next = 0;
+                      if (next > max) next = max;
+                      setPreviewDragOffset(next);
+                    }}
+                    onPointerUp={(e) => {
+                      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                      dragStateRef.current = null;
+                    }}
+                  >
+                    <div className="w-8 h-1 rounded-full bg-white/50" />
+                    <span>Arraste para rolar</span>
+                  </div>
+                )}
+              </div>
+
+              {recording && (
+                <div className="absolute inset-0 z-50 bg-black/85 flex flex-col items-center justify-center gap-3 px-6 rounded-2xl">
+                  <Loader2 className="h-7 w-7 animate-spin text-purple-400" />
+                  <div className="text-white text-xs font-semibold">
+                    Gravando vídeo... {Math.round(exportProgress)}%
+                  </div>
+                  <Progress
+                    value={exportProgress}
+                    className="w-full h-1.5 bg-zinc-800 [&>div]:bg-purple-500"
+                  />
+                </div>
+              )}
+            </div>
+          </section>
+
+        </div>
+
+        {/* 4. RODAPÉ FIXO DE REPRODUÇÃO & EXPORTAÇÃO RÁPIDA */}
+        <footer className="fixed bottom-0 left-0 right-0 h-20 bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 px-6 flex items-center justify-between shrink-0 z-50">
+          {/* LADO ESQUERDO: CONTROLES DE PLAYBACK OU STATUS */}
+          <div className="flex items-center gap-4">
+            {playing && !recording ? (
+              <div className="flex items-center gap-2">
+                {/* Voltar */}
+                <button
+                  onClick={skipBackward}
+                  className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+                  title="Voltar 5 mensagens"
+                >
+                  <SkipBack className="h-4 w-4" />
+                </button>
+
+                {/* Play/Pause */}
+                <button
+                  onClick={togglePause}
+                  className="p-2 rounded-full bg-purple-600 hover:bg-purple-500 text-white transition shadow-md shadow-purple-600/10"
+                  title={paused ? "Continuar" : "Pausar"}
+                >
+                  {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                </button>
+
+                {/* Avançar */}
+                <button
+                  onClick={skipForward}
+                  className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+                  title="Avançar 5 mensagens"
+                >
+                  <SkipForward className="h-4 w-4" />
+                </button>
+
+                {/* Parar */}
+                <button
+                  onClick={stopPlayback}
+                  className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-red-400 transition"
+                  title="Parar"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => playAnimation()}
+                disabled={!allAudiosReady || playing || recording}
+                variant="secondary"
+                size="sm"
+                className="h-9 font-medium text-xs gap-1.5"
+              >
+                <Play className="h-3.5 w-3.5" /> Play Vídeo
+              </Button>
+            )}
+
+            {/* Contador de tempo/mensagens */}
+            {playing && !recording && (
+              <div className="flex items-center gap-2.5 text-xs text-zinc-400 font-mono border-l border-zinc-800 pl-4 h-6">
+                <span>{formatTime(playbackElapsed)}</span>
+                <span className="text-zinc-600">•</span>
+                <span>{currentMsgIndex}/{totalMsgCount} msgs</span>
+              </div>
+            )}
+          </div>
+
+          {/* CENTRO: BARRA DE PROGRESSO DO PLAYER ESTILO YOUTUBE */}
+          {playing && !recording && (
+            <div className="flex-1 max-w-md mx-6">
+              <div
+                className="group relative w-full h-1.5 bg-zinc-800 rounded-full cursor-pointer hover:h-2 transition-all"
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -3769,155 +5197,40 @@ export default function ChatStoryGenerator() {
                   style={{ width: `${totalMsgCount > 0 ? (currentMsgIndex / totalMsgCount) * 100 : 0}%` }}
                 />
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-red-500 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-red-550 border border-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ left: `calc(${totalMsgCount > 0 ? (currentMsgIndex / totalMsgCount) * 100 : 0}% - 7px)` }}
                 />
               </div>
-
-              {/* Controls Row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1">
-                  {/* Skip Back */}
-                  <button
-                    onClick={skipBackward}
-                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
-                    title="Voltar 5 mensagens"
-                  >
-                    <SkipBack className="h-4 w-4" />
-                  </button>
-
-                  {/* Play/Pause */}
-                  <button
-                    onClick={togglePause}
-                    className="p-2 rounded-full hover:bg-white/15 text-white hover:text-white transition-colors"
-                    title={paused ? "Continuar" : "Pausar"}
-                  >
-                    {paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
-                  </button>
-
-                  {/* Skip Forward */}
-                  <button
-                    onClick={skipForward}
-                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
-                    title="Avançar 5 mensagens"
-                  >
-                    <SkipForward className="h-4 w-4" />
-                  </button>
-
-                  {/* Stop */}
-                  <button
-                    onClick={stopPlayback}
-                    className="p-1.5 rounded-full hover:bg-white/15 text-white/80 hover:text-white transition-colors"
-                    title="Parar"
-                  >
-                    <Square className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {/* Time & Progress Info */}
-                <div className="flex items-center gap-3 text-xs text-white/70 font-mono">
-                  <span>{formatTime(playbackElapsed)}</span>
-                  <span className="text-white/40">•</span>
-                  <span>{currentMsgIndex}/{totalMsgCount} msgs</span>
-                </div>
-              </div>
             </div>
           )}
 
-          <div className="flex flex-col gap-3" style={{ width: 400 }}>
+          {/* LADO DIREITO: EXPORTAÇÃO RÁPIDA */}
+          <div className="flex items-center gap-2">
+            {!allAudiosReady && (
+              <span className="text-[10px] text-zinc-500 mr-2">Gere os áudios primeiro para liberar o play/exportação</span>
+            )}
             <Button
               onClick={() => exportVideoFast(false)}
               disabled={!allAudiosReady || playing || recording}
-              size="lg"
-              className="w-full"
-              variant="secondary"
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs h-9 px-4 shadow-lg shadow-purple-600/10"
             >
               {recording ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Rendering... {Math.round(exportProgress)}%
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Salvando... {Math.round(exportProgress)}%
                 </>
               ) : (
                 <>
-                  <Upload className="mr-2 h-4 w-4 rotate-180" />
-                  Exportar Vídeo (Chat Ativo)
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={() => exportVideoFast(true)}
-              disabled={!allAudiosReady || playing || recording}
-              size="lg"
-              className="w-full"
-              variant="outline"
-            >
-              {recording ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Rendering... {Math.round(exportProgress)}%
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4 rotate-180" />
-                  Exportar Vídeo (Todos os Chats)
+                  <Download className="mr-2 h-3.5 w-3.5" />
+                  Exportar Vídeo
                 </>
               )}
             </Button>
           </div>
-        </div>
-        </div>
-      </TabsContent>
+        </footer>
 
-      <TabsContent value="projects" className="mt-0 p-8 bg-background min-h-[calc(100vh-60px)]">
-        <div className="max-w-4xl mx-auto space-y-4">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">Meus Projetos</h2>
-            <p className="text-sm text-muted-foreground">
-              Projetos salvos localmente com áudios e imagens incluídos.
-            </p>
-          </div>
-          {projects.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
-              Nenhum projeto salvo ainda. Salve um projeto na aba Editor.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((p) => {
-                const totalMsgs = p.chats.reduce((acc, c) => acc + c.messages.length, 0);
-                return (
-                  <div
-                    key={p.id}
-                    className="rounded-lg border p-4 space-y-3 bg-card hover:shadow-md transition"
-                  >
-                    <div>
-                      <div className="font-semibold truncate">{p.projectName}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(p.createdAt).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {p.chats.length} chat(s) • {totalMsgs} mensagens • tema {p.theme}
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => handleLoadProject(p)} className="flex-1">
-                        <FolderOpen className="h-3 w-3 mr-1" /> Carregar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleDeleteProject(p.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </TabsContent>
-    </Tabs>
+      </div>
+    </div>
   );
 }

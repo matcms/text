@@ -38,6 +38,8 @@ export type StoredChat = {
   messages: StoredMsg[];
   voiceMap: Record<string, string>;
   characterPhotos?: Record<string, string>;
+  aiPrompt?: string;
+  aiChapterInstruction?: string;
 };
 
 export type StoredAudio = {
