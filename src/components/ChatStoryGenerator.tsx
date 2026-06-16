@@ -780,8 +780,8 @@ export default function ChatStoryGenerator() {
     return texts.length > 0 && texts.every((m) => !!m.audioUrl);
   }, [chats]);
 
-  const parseScript = (scriptOverride?: string) => {
-    const scriptToParse = scriptOverride !== undefined ? scriptOverride : activeChat.script;
+  const parseScript = (scriptOverride?: string | React.MouseEvent) => {
+    const scriptToParse = typeof scriptOverride === "string" ? scriptOverride : activeChat.script;
     const lines = scriptToParse.split("\n").map((l) => l.trim()).filter(Boolean);
 
     type Seg = { theme: ChatTheme; contactName: string; lines: string[]; groupMode: boolean | null; headerLine?: string };
@@ -3469,7 +3469,7 @@ Regras CRÍTICAS:
                   </div>
                 </div>
 
-                <Button onClick={parseScript} className="w-full bg-purple-600 hover:bg-purple-500 text-white h-10 font-medium text-xs">
+                <Button onClick={() => parseScript()} className="w-full bg-purple-600 hover:bg-purple-500 text-white h-10 font-medium text-xs">
                   Processar Roteiro (Parse Script)
                 </Button>
               </div>
