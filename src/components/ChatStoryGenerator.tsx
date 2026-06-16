@@ -4810,7 +4810,7 @@ Regras CRÍTICAS:
                       chatOuterRef.current = el;
                       chatScrollRef.current = el;
                     }}
-                    className="w-full relative overflow-hidden flex-shrink min-h-[300px]"
+                    className="w-full relative overflow-hidden flex-shrink"
                     style={{
                       ...(isWA
                         ? {
