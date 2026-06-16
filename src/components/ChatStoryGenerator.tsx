@@ -357,10 +357,11 @@ export default function ChatStoryGenerator() {
   const [isGroupChat, setIsGroupChat] = useState(false);
 
   // Voice library (persisted)
-  type SavedVoice = { name: string; voiceId: string };
+  type SavedVoice = { name: string; voiceId: string; referenceAudioB64?: string };
   const [savedVoices, setSavedVoices] = useState<SavedVoice[]>([]);
   const [newVoiceName, setNewVoiceName] = useState("");
   const [newVoiceId, setNewVoiceId] = useState("");
+  const [newVoiceRefAudioB64, setNewVoiceRefAudioB64] = useState<string | null>(null);
   const [designGender, setDesignGender] = useState("female");
   const [designAge, setDesignAge] = useState("young adult");
   const [designPitch, setDesignPitch] = useState("moderate pitch");
@@ -388,9 +389,13 @@ export default function ChatStoryGenerator() {
     }
     
     if (!v) return;
-    setSavedVoices((p) => [...p.filter((x) => x.name !== n), { name: n, voiceId: v }]);
+    setSavedVoices((p) => [
+      ...p.filter((x) => x.name !== n),
+      { name: n, voiceId: v, referenceAudioB64: newVoiceRefAudioB64 || undefined }
+    ]);
     setNewVoiceName("");
     setNewVoiceId("");
+    setNewVoiceRefAudioB64(null);
   };
   const removeSavedVoice = (name: string) => {
     setSavedVoices((p) => p.filter((x) => x.name !== name));
@@ -3711,9 +3716,16 @@ Regras CRÍTICAS:
                                       onChange={(e) => {
                                         const sel = savedVoices.find((v) => v.name === e.target.value);
                                         if (sel) {
-                                          updateActiveChat({
+                                          const patches: any = {
                                             voiceMap: { ...activeChat.voiceMap, [name]: sel.voiceId },
-                                          });
+                                          };
+                                          if (sel.referenceAudioB64) {
+                                            patches.characterAudios = {
+                                              ...(activeChat.characterAudios || {}),
+                                              [name]: sel.referenceAudioB64,
+                                            };
+                                          }
+                                          updateActiveChat(patches);
                                         }
                                       }}
                                     >
@@ -3977,6 +3989,49 @@ Regras CRÍTICAS:
                               </select>
                             </div>
                           </div>
+
+                          <div className="space-y-1 pt-1">
+                            <Label className="text-[9px] text-zinc-400">Áudio Clone de Referência (Opcional)</Label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                id="voice-lib-audio-input"
+                                type="file"
+                                accept="audio/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) {
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      setNewVoiceRefAudioB64(String(reader.result || ""));
+                                      toast.success("Áudio de referência carregado!");
+                                    };
+                                    reader.readAsDataURL(f);
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                type="button"
+                                onClick={() => document.getElementById("voice-lib-audio-input")?.click()}
+                                className="h-8 text-xs flex-1 border-zinc-800 bg-zinc-950 text-zinc-300 hover:text-white"
+                              >
+                                {newVoiceRefAudioB64 ? "✓ Áudio de Ref Carregado" : "Carregar Áudio de Ref"}
+                              </Button>
+                              {newVoiceRefAudioB64 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  type="button"
+                                  onClick={() => setNewVoiceRefAudioB64(null)}
+                                  className="h-8 text-xs text-red-400 hover:text-red-350"
+                                >
+                                  Remover
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
@@ -4001,16 +4056,26 @@ Regras CRÍTICAS:
                       {savedVoices.length > 0 && (
                         <div className="space-y-1.5 pt-2 border-t border-zinc-800/40">
                           {savedVoices.map((v) => (
-                            <div key={v.name} className="flex items-center justify-between text-[11px] bg-zinc-950 px-2.5 py-1.5 rounded border border-zinc-850">
-                              <span className="font-semibold text-zinc-200 w-24 truncate">{v.name}</span>
-                              <code className="flex-1 truncate text-zinc-400 text-[9px] ml-2">{v.voiceId}</code>
-                              <button
-                                onClick={() => removeSavedVoice(v.name)}
-                                className="opacity-60 hover:opacity-100 hover:text-red-400 transition ml-2"
-                                aria-label="Remove"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
+                            <div key={v.name} className="flex flex-col gap-1.5 bg-zinc-950 px-2.5 py-1.5 rounded border border-zinc-850">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-semibold text-zinc-200 w-24 truncate">{v.name}</span>
+                                <code className="flex-1 truncate text-zinc-400 text-[9px] ml-2">{v.voiceId}</code>
+                                <button
+                                  onClick={() => removeSavedVoice(v.name)}
+                                  className="opacity-60 hover:opacity-100 hover:text-red-400 transition ml-2"
+                                  aria-label="Remove"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              {v.referenceAudioB64 && (
+                                <div className="flex items-center gap-1.5 pt-1 border-t border-zinc-900/60">
+                                  <span className="text-[8px] font-medium text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
+                                    🎙️ Clone
+                                  </span>
+                                  <audio src={v.referenceAudioB64} controls className="h-5 flex-1 filter invert opacity-70 scale-90 origin-left" />
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
