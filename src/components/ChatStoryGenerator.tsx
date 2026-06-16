@@ -1992,6 +1992,60 @@ Regras CRÍTICAS:
     }
   };
 
+  const linkAllAudios = () => {
+    let currentMessages = [...activeChat.messages];
+    let boundCount = 0;
+
+    for (const g of generatedAudios) {
+      const isAlreadyLinked = currentMessages.some(
+        (m) => m.type === "text" && m.audioUrl === g.audioUrl
+      );
+      if (isAlreadyLinked) continue;
+
+      let bound = false;
+      currentMessages = currentMessages.map((m) => {
+        if (
+          !bound &&
+          m.type === "text" &&
+          !m.audioUrl &&
+          m.voiceName.toLowerCase() === g.voiceName.toLowerCase() &&
+          m.text.toLowerCase() === g.text.toLowerCase()
+        ) {
+          bound = true;
+          boundCount++;
+          return { ...m, audioUrl: g.audioUrl };
+        }
+        return m;
+      });
+
+      if (!bound) {
+        const textMsgsWithoutAudio = currentMessages.filter(
+          (m): m is TextMsg => m.type === "text" && !m.audioUrl
+        );
+        if (textMsgsWithoutAudio.length > 0) {
+          const candidate = textMsgsWithoutAudio.find(
+            (m) => m.voiceName.toLowerCase() === g.voiceName.toLowerCase()
+          ) || textMsgsWithoutAudio[0];
+          
+          currentMessages = currentMessages.map((m) => {
+            if (m.id === candidate.id && m.type === "text") {
+              boundCount++;
+              return { ...m, audioUrl: g.audioUrl };
+            }
+            return m;
+          });
+        }
+      }
+    }
+
+    if (boundCount > 0) {
+      updateActiveChat({ messages: currentMessages });
+      toast.success(`${boundCount} áudio(s) vinculado(s) com sucesso!`);
+    } else {
+      toast.info("Nenhum áudio novo elegível para vinculação.");
+    }
+  };
+
   const generateAudios = async (resumeOnly?: boolean) => {
     if (ttsProvider === "elevenlabs" && !elevenKey) {
       alert("Por favor, insira sua API key do ElevenLabs");
@@ -4315,6 +4369,16 @@ Regras CRÍTICAS:
                 <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
                   <div className="flex items-center justify-between pb-2 border-b border-zinc-850">
                     <h3 className="font-semibold text-xs text-zinc-200">Biblioteca de Áudios ({generatedAudios.length})</h3>
+                    {generatedAudios.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={linkAllAudios}
+                        className="text-[10px] h-7 px-2 border-purple-800/80 hover:bg-purple-900/20 hover:border-purple-650 hover:text-white transition duration-150"
+                      >
+                        Vincular Todos
+                      </Button>
+                    )}
                   </div>
                   {generatedAudios.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-zinc-850 p-6 text-center text-zinc-500 text-xs">
