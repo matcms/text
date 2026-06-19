@@ -1501,7 +1501,8 @@ Regras CRÍTICAS:
 1. Retorne APENAS o texto do roteiro no formato especificado. Não escreva nenhuma introdução, explicação ou consideração antes ou depois do roteiro.
 2. Certifique-se de que cada linha de diálogo comece exatamente com "1: " ou "2: " seguido pelo nome do personagem, caractere ">" e a mensagem.
 3. Se for uma continuação (capítulo seguinte), NÃO gere cabeçalhos (como "- iMessage: ..."), apenas as falas que continuam a história.
-4. Mantenha os nomes dos personagens exatamente iguais aos que já foram criados no histórico do chat.`;
+4. Mantenha os nomes dos personagens exatamente iguais aos que já foram criados no histórico do chat.
+5. NUNCA inicie ou inclua títulos ou cabeçalhos em Markdown (por exemplo, NÃO use '#', '##' ou '###' para títulos ou seções como '## Roteiro'). Comece a resposta diretamente com o conteúdo do roteiro (seja o cabeçalho do tema ou a primeira fala).`;
 
       let generatedText = "";
 
@@ -1723,7 +1724,8 @@ Regras CRÍTICAS:
 2. Certifique-se de que cada linha de diálogo comece exatamente com "1: " ou "2: " seguido pelo nome do personagem, caractere ">" e a mensagem.
 3. Classifique os lados coerentemente: mantenha o personagem principal (normalmente o autor do chat/dono do celular) sempre do lado direito ("2: ") e os interlocutores do lado esquerdo ("1: ").
 4. Se o usuário forneceu orientações adicionais de tradução ou modificações, siga-as à risca durante a formatação.
-5. Se o texto original contiver múltiplos chats ou cenas separados (como diferentes blocos de diálogo), certifique-se de colocar um cabeçalho "- iMessage: [NomeDoChat]" ou "- WhatsApp: [NomeDoChat]" para cada um deles no início de seu respectivo bloco, e separe cada bloco de chat com uma linha contendo "---".`;
+5. Se o texto original contiver múltiplos chats ou cenas separados (como diferentes blocos de diálogo), certifique-se de colocar um cabeçalho "- iMessage: [NomeDoChat]" ou "- WhatsApp: [NomeDoChat]" para cada um deles no início de seu respectivo bloco, e separe cada bloco de chat com uma linha contendo "---".
+6. NUNCA inicie ou estruture a resposta com títulos ou cabeçalhos em Markdown (por exemplo, NÃO use '#', '##' ou '###' como '## Roteiro'). Comece a resposta diretamente com o cabeçalho do tema (ex: - iMessage: Lucas).`;
 
       let userPrompt = `Roteiro original a ser formatado:\n${rawScriptInput}\n\n`;
       if (formatterInstructions.trim()) {

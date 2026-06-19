@@ -652,7 +652,8 @@ Você deve:
 2. Adaptar essa história para um formato de diálogo de chat dinâmico e interessante, adequado para prender a atenção do público em vídeos de redes sociais.
 3. Se for fornecido frames do vídeo, analise o que acontece visualmente e crie as falas correspondentes (por exemplo, descrevendo as reações ou ações dos participantes).
 4. Retorne APENAS o roteiro formatado. Não escreva nenhuma introdução, explicação ou consideração antes ou depois do roteiro.
-5. Se o usuário forneceu orientações adicionais, siga-as estritamente ao criar o roteiro."""
+5. Se o usuário forneceu orientações adicionais, siga-as estritamente ao criar o roteiro.
+6. NUNCA inicie ou estruture a resposta com títulos ou cabeçalhos em Markdown (por exemplo, NÃO use '#', '##' ou '###' como '## Roteiro'). Comece a resposta diretamente com o cabeçalho do tema (ex: - iMessage: Lucas)."""
 
         user_prompt = ""
         if subtitles:
