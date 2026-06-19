@@ -1554,6 +1554,32 @@ Regras CRÍTICAS:
         // Local LLM
         const baseUrl = localLlmUrl.replace(/\/$/, "");
         const url = `${baseUrl}/chat/completions`;
+
+        let fewShotPrompt = "";
+        if (!isContinuation) {
+          fewShotPrompt = `Exemplo de Geração (inicie diretamente sem títulos ou cabeçalhos Markdown):\n` +
+            `Entrada: Premissa Geral: "Um casal decidindo o que jantar"\n\n` +
+            `Saída:\n` +
+            `- iMessage: Amor\n` +
+            `2: Ana> Oi! O que vamos jantar hoje?\n` +
+            `1: Lucas> Não sei, que tal pizza?\n` +
+            `2: Ana> Pizza de novo? Comemos ontem!\n\n` +
+            `Agora, gere a história para a seguinte entrada:\n` +
+            `${userPrompt}`;
+        } else {
+          fewShotPrompt = `Exemplo de Geração de Continuação (inicie diretamente com as falas, sem cabeçalhos ou títulos Markdown):\n` +
+            `Entrada: Histórico atual: \n` +
+            `- iMessage: Amor\n` +
+            `2: Ana> O que vamos jantar hoje?\n` +
+            `1: Lucas> Que tal pizza?\n\n` +
+            `Instrução: Ana sugere hambúrguer.\n\n` +
+            `Saída:\n` +
+            `2: Ana> Que tal pedirmos hambúrguer?\n` +
+            `1: Lucas> Boa! Aquele artesanal?\n\n` +
+            `Agora, gere a continuação para a seguinte entrada:\n` +
+            `${userPrompt}`;
+        }
+
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -1563,7 +1589,7 @@ Regras CRÍTICAS:
           body: JSON.stringify({
             model: localLlmModel || "local-model",
             messages: [
-              { role: "user", content: `${systemPrompt}\n\n${userPrompt}` }
+              { role: "user", content: `${systemPrompt}\n\n${fewShotPrompt}` }
             ]
           })
         });
@@ -1783,6 +1809,20 @@ Regras CRÍTICAS:
         // Local LLM
         const baseUrl = localLlmUrl.replace(/\/$/, "");
         const url = `${baseUrl}/chat/completions`;
+
+        const fewShotPrompt = `Exemplo de Conversão (inicie diretamente sem títulos ou cabeçalhos Markdown):\n` +
+          `Entrada:\n` +
+          `Dr. Woods: Mantenha-me atualizado\n` +
+          `Dr. Woods: Vamos garantir que isso nunca mais aconteça\n` +
+          `EU: Concordo\n\n` +
+          `Saída:\n` +
+          `- iMessage: Dr. Woods\n` +
+          `1: Dr. Woods> Mantenha-me atualizado\n` +
+          `1: Dr. Woods> Vamos garantir que isso nunca mais aconteça\n` +
+          `2: EU> Concordo\n\n` +
+          `Agora, converta o seguinte:\n` +
+          `${userPrompt}`;
+
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -1792,7 +1832,7 @@ Regras CRÍTICAS:
           body: JSON.stringify({
             model: localLlmModel || "local-model",
             messages: [
-              { role: "user", content: `${systemPrompt}\n\n${userPrompt}` }
+              { role: "user", content: `${systemPrompt}\n\n${fewShotPrompt}` }
             ]
           })
         });
