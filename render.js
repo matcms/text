@@ -64,6 +64,21 @@ async function run() {
 
   try {
     const page = await browser.newPage();
+
+    // Pipe browser page logs and errors to console
+    page.on('console', msg => {
+      const text = msg.text();
+      if (msg.type() === 'error' || text.includes('failed') || text.includes('Error')) {
+        console.log(`[Browser Console] ${msg.type().toUpperCase()}: ${text}`);
+      }
+    });
+    page.on('pageerror', err => {
+      console.error(`[Browser PageError] ${err.toString()}`);
+    });
+    page.on('requestfailed', request => {
+      console.warn(`[Browser RequestFailed] ${request.url()} - ${request.failure()?.errorText || 'Unknown error'}`);
+    });
+
     // Set viewport matching exactly 1080x1920 phone size
     await page.setViewport({ width: 1080, height: 1920 });
 

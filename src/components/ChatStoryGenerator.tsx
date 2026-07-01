@@ -505,7 +505,7 @@ export default function ChatStoryGenerator() {
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
-  const activeChat = chats.find((c) => c.id === activeChatId)!;
+  const activeChat = chats.find((c) => c.id === activeChatId) || chats[0] || { id: "", name: "", contactName: "", contactPhoto: null, messages: [] };
 
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState({ done: 0, total: 0 });
@@ -671,7 +671,11 @@ export default function ChatStoryGenerator() {
         console.log("initRenderLocal called", data);
         setProjectName(data.projectName || "chat-story");
         setChatTheme(data.chatTheme || "imessage");
-        setChats(data.chats || []);
+        const newChats = data.chats || [];
+        setChats(newChats);
+        if (newChats.length > 0) {
+          setActiveChatId(newChats[0].id);
+        }
         setActiveBackground(data.activeBackground || "#9333ea");
         setBgVideoOffset(data.bgVideoOffset || 0);
       };
