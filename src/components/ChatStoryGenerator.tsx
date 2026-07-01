@@ -1390,7 +1390,12 @@ export default function ChatStoryGenerator() {
   };
 
   const onUploadContactPhoto = (file: File) => {
-    updateActiveChat({ contactPhoto: URL.createObjectURL(file) });
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const b64 = reader.result as string;
+      updateActiveChat({ contactPhoto: b64 });
+    };
+    reader.readAsDataURL(file);
   };
 
   const pasteContactPhoto = async () => {

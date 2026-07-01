@@ -266,7 +266,7 @@ body.is-render-local-mode #phone-preview-phone {
 
 /* Hide everything else on the page during local rendering */
 body.is-render-local-mode main,
-body.is-render-local-mode sidebar,
+body.is-render-local-mode aside,
 body.is-render-local-mode header,
 body.is-render-local-mode footer,
 body.is-render-local-mode button,
