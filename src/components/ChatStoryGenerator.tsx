@@ -2731,16 +2731,50 @@ Regras CRÍTICAS:
         fastStart: "in-memory"
       });
 
+      let selectedCodec = "avc1.4d002a";
+      let selectedHardwareAcceleration: "prefer-hardware" | "no-preference" = "prefer-hardware";
+
+      const configsToTest = [
+        { codec: "avc1.64002a", acceleration: "prefer-hardware" as const },
+        { codec: "avc1.4d002a", acceleration: "prefer-hardware" as const },
+        { codec: "avc1.64002a", acceleration: "no-preference" as const },
+        { codec: "avc1.4d002a", acceleration: "no-preference" as const },
+        { codec: "avc1.42e02a", acceleration: "no-preference" as const },
+      ];
+
+      for (const t of configsToTest) {
+        try {
+          const support = await (window as any).VideoEncoder.isConfigSupported({
+            codec: t.codec,
+            width: 1080,
+            height: 1920,
+            bitrate: 6_000_000,
+            hardwareAcceleration: t.acceleration,
+            avc: { format: "avc" }
+          });
+          if (support.supported) {
+            selectedCodec = t.codec;
+            selectedHardwareAcceleration = t.acceleration;
+            break;
+          }
+        } catch (err) {
+          console.warn("isConfigSupported failed for config", t, err);
+        }
+      }
+
       const videoEncoder = new (window as any).VideoEncoder({
         output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
-        error: (e: any) => console.error("Video error:", e),
+        error: (e: any) => {
+          console.error("Video error:", e);
+          alert(`Erro no Codificador de Vídeo: ${e.message || e}`);
+        },
       });
       videoEncoder.configure({
-        codec: "avc1.4d002a",
+        codec: selectedCodec,
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
-        hardwareAcceleration: "prefer-hardware",
+        hardwareAcceleration: selectedHardwareAcceleration,
         avc: { format: "avc" }
       });
 
