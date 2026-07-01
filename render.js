@@ -38,18 +38,12 @@ console.log(`Nome do Arquivo: ${outputName}.mp4`);
 console.log(`Origin do App: ${origin}`);
 console.log("=========================================");
 
-// 3. Write audio WAV file if present
-const tempAudioPath = path.join(__dirname, 'temp_audio.wav');
+// 3. Check audio WAV file if present
+const tempAudioPath = project.audioPath;
 let hasAudio = false;
-if (audioBase64) {
-  try {
-    const audioBuffer = Buffer.from(audioBase64, 'base64');
-    fs.writeFileSync(tempAudioPath, audioBuffer);
-    hasAudio = true;
-    console.log("Audio importado com sucesso.");
-  } catch (err) {
-    console.error("Erro ao salvar arquivo de audio:", err);
-  }
+if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+  hasAudio = true;
+  console.log("Audio do projeto localizado com sucesso.");
 }
 
 // 4. Resolve output path (Downloads folder)
@@ -170,7 +164,13 @@ async function run() {
     // Clean up temporary files
     try {
       if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
-      if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+      if (tempAudioPath) {
+        const tempFolder = path.dirname(tempAudioPath);
+        if (fs.existsSync(tempFolder)) {
+          fs.rmSync(tempFolder, { recursive: true, force: true });
+          console.log("Arquivos temporarios de midia limpos com sucesso.");
+        }
+      }
     } catch (e) {
       console.warn("Nao foi possivel apagar arquivos temporarios:", e);
     }

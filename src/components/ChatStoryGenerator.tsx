@@ -345,15 +345,91 @@ function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
 }
 
 const startLocalRenderServerFn = createServerFn({ method: "POST" })
-  .validator((data: { projectJson: string }) => data)
+  .validator((data: any) => data)
   .handler(async ({ data }) => {
     const { exec } = await import("child_process");
     const fs = await import("fs");
     const path = await import("path");
     
+    // data is a FormData instance on the server side
+    const projectRaw = data.get("project") as string;
+    const audioFile = data.get("audio") as any; // Blob/File
+    const bgVideoFile = data.get("bgVideo") as any; // Blob/File
+    
     const cwd = process.cwd();
-    const tempJsonPath = path.join(cwd, `temp_project_${Date.now()}.json`);
-    fs.writeFileSync(tempJsonPath, data.projectJson, 'utf8');
+    const timestamp = Date.now();
+    const tempDirName = `temp_render_${timestamp}`;
+    const tempDirPath = path.join(cwd, "public", tempDirName);
+    
+    // Create the temporary folder in static public directory
+    fs.mkdirSync(tempDirPath, { recursive: true });
+    
+    // 1) Save audio file
+    if (audioFile) {
+      const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
+      fs.writeFileSync(path.join(tempDirPath, "audio.wav"), audioBuffer);
+    }
+    
+    // 2) Save background video file
+    if (bgVideoFile) {
+      const bgVideoBuffer = Buffer.from(await bgVideoFile.arrayBuffer());
+      fs.writeFileSync(path.join(tempDirPath, "bg_video.mp4"), bgVideoBuffer);
+    }
+    
+    // 3) Save all message video files
+    for (const key of data.keys()) {
+      if (key.startsWith("msgVideo_")) {
+        const file = data.get(key) as any;
+        if (file) {
+          const fileBuffer = Buffer.from(await file.arrayBuffer());
+          const idxStr = key.replace("msgVideo_", "");
+          fs.writeFileSync(path.join(tempDirPath, `msg_video_${idxStr}.mp4`), fileBuffer);
+        }
+      }
+    }
+    
+    // 4) Parse project JSON and update all paths to live server asset URLs
+    const project = JSON.parse(projectRaw);
+    const host = project.origin || "http://localhost:8080";
+    
+    // Update audio track path (used by render.js directly)
+    project.audioPath = path.join(tempDirPath, "audio.wav");
+    
+    // Update background path in project (if active background is a video)
+    if (bgVideoFile) {
+      project.activeBackground = `${host}/${tempDirName}/bg_video.mp4`;
+    }
+    
+    // Update message video URLs in project
+    if (project.messages && Array.isArray(project.messages)) {
+      project.messages = project.messages.map((m: any, idx: number) => {
+        if (m.type === "video" && m.videoUrl && m.videoUrl.endsWith(".mp4")) {
+          return {
+            ...m,
+            videoUrl: `${host}/${tempDirName}/${m.videoUrl}`
+          };
+        }
+        return m;
+      });
+    }
+    
+    // Update chats message video URLs too
+    if (project.chats && Array.isArray(project.chats)) {
+      project.chats = project.chats.map((c: any) => {
+        if (c.messages && Array.isArray(c.messages)) {
+          c.messages = c.messages.map((m: any) => {
+            const cleanMsg = project.messages.find((orig: any) => orig.id === m.id);
+            if (cleanMsg) return cleanMsg;
+            return m;
+          });
+        }
+        return c;
+      });
+    }
+    
+    // Write the finalized project file to disk
+    const tempJsonPath = path.join(cwd, `temp_project_${timestamp}.json`);
+    fs.writeFileSync(tempJsonPath, JSON.stringify(project, null, 2), "utf8");
     
     const command = `start cmd.exe /c "cd /d ${cwd} && node render.js ${tempJsonPath}"`;
     
@@ -3483,21 +3559,11 @@ Regras CRÍTICAS:
 
       setLocalExportProgress(40);
 
-      // Convert mixed AudioBuffer to WAV base64 (using native FileReader to avoid Out of Memory)
+      // Convert mixed AudioBuffer to WAV ArrayBuffer
       const wavArrBuffer = audioBufferToWav(renderedAudio);
       const audioBlob = new Blob([wavArrBuffer], { type: "audio/wav" });
-      const audioBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64data = reader.result as string;
-          const base64 = base64data.split(",")[1];
-          resolve(base64);
-        };
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(audioBlob);
-      });
 
-      setLocalExportProgress(60);
+      setLocalExportProgress(50);
 
       const startTimesSec: number[] = [];
       let currentAcc = 0;
@@ -3506,32 +3572,69 @@ Regras CRÍTICAS:
         currentAcc += tracksInfo[j].duration;
       }
 
-      // Gather full payload for local node renderer
+      // Build FormData to send media as binary blobs natively (uses virtually 0 extra RAM)
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "audio.wav");
+
+      let bgVideoFilename = "";
+      if (activeBackground.startsWith("data:video/")) {
+        const blob = dataURLtoBlob(activeBackground);
+        formData.append("bgVideo", blob, "bg_video.mp4");
+        bgVideoFilename = "bg_video.mp4";
+      }
+
+      setLocalExportProgress(65);
+
+      const cleanMessages = await Promise.all(messages.map(async (msg, idx) => {
+        if (msg.type === "video" && msg.videoUrl && msg.videoUrl.startsWith("data:video/")) {
+          const blob = dataURLtoBlob(msg.videoUrl);
+          const filename = `msg_video_${idx}.mp4`;
+          formData.append(`msgVideo_${idx}`, blob, filename);
+          return {
+            ...msg,
+            videoUrl: filename
+          };
+        }
+        return msg;
+      }));
+
+      setLocalExportProgress(80);
+
       const payload = {
         origin: window.location.origin,
         fps: exportFps,
         duration: totalDurationSec,
         projectName: projectName,
         chatTheme: chatTheme,
-        activeBackground: activeBackground,
+        activeBackground: bgVideoFilename ? bgVideoFilename : activeBackground,
         bgVideoOffset: bgVideoOffset,
         chats: chats.map(c => ({
           id: c.id,
           name: c.name,
           contactName: c.contactName,
           contactPhoto: c.contactPhoto,
-          messages: c.messages
+          messages: c.messages.map(m => {
+            const msgIdx = messages.findIndex(orig => orig.id === m.id);
+            if (m.type === "video" && msgIdx >= 0) {
+              return {
+                ...m,
+                videoUrl: `msg_video_${msgIdx}.mp4`
+              };
+            }
+            return m;
+          })
         })),
-        messages: messages,
+        messages: cleanMessages,
         startTimesSec: startTimesSec,
-        audioBase64: audioBase64,
         outputName: (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_")
       };
 
-      setLocalExportProgress(80);
+      formData.append("project", JSON.stringify(payload));
 
-      // Trigger the local renderer!
-      const res = await startLocalRenderServerFn({ data: { projectJson: JSON.stringify(payload) } });
+      setLocalExportProgress(90);
+
+      // Trigger the local renderer with the FormData!
+      const res = await startLocalRenderServerFn({ data: formData });
       
       if (res.success) {
         setLocalExportProgress(100);

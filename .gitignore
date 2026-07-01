@@ -36,3 +36,7 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Local render temporary files
+public/temp_render_*
+temp_project*.json
