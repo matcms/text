@@ -468,7 +468,7 @@ export default function ChatStoryGenerator() {
   const [bgVideoOffset, setBgVideoOffset] = useState<number>(0); // Video background start offset in seconds
   const [bgVideoDuration, setBgVideoDuration] = useState<number>(0);
   const activeBgVideoRef = useRef<HTMLVideoElement | null>(null);
-  const [exportFps, setExportFps] = useState<number>(60);
+  const [exportFps, setExportFps] = useState<number>(30);
 
   useEffect(() => {
     (async () => {
@@ -744,7 +744,7 @@ export default function ChatStoryGenerator() {
     setOmniNumStep(Number(localStorage.getItem("omni_num_step")) || 32);
     setOmniGuidanceScale(Number(localStorage.getItem("omni_guidance_scale")) || 2.0);
     setBgVideoOffset(Number(localStorage.getItem("bg_video_offset")) || 0);
-    setExportFps(Number(localStorage.getItem("export_fps")) || 60);
+    setExportFps(Number(localStorage.getItem("export_fps")) || 30);
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
