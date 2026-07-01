@@ -2982,7 +2982,10 @@ Regras CRÍTICAS:
             try {
               const bgVideo = await getVideoElement(activeBackground);
               const currentFrameTimeSec = timestampUs / 1_000_000;
-              await seekVideoLoop(bgVideo, currentFrameTimeSec);
+              // Throttle seeks to every 2 frames to cut GPU decoding load in half
+              if (framesEncoded % 2 === 0) {
+                await seekVideoLoop(bgVideo, currentFrameTimeSec);
+              }
               
               // Draw video background with cover-fit crop
               const imgW = bgVideo.videoWidth || 1080;
@@ -3060,6 +3063,11 @@ Regras CRÍTICAS:
           frame.close();
           timestampUs += 1_000_000 / fps;
           framesEncoded++;
+
+          // Let the browser and GPU breathe every 10 frames to avoid thread blocking
+          if (framesEncoded % 10 === 0) {
+            await new Promise((r) => setTimeout(r, 10));
+          }
         }
         staticBitmap.close();
         
