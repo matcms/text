@@ -214,4 +214,65 @@
 }
 
 
+/* 
+ * Local Renderer Fullscreen Styles 
+ * Used during local PC video export (Puppeteer screenshots)
+ */
+body.is-render-local-mode {
+  width: 1080px !important;
+  height: 1920px !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background-color: #000 !important;
+}
+
+body.is-render-local-mode #phone-preview-section {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 1080px !important;
+  height: 1920px !important;
+  z-index: 99999 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+body.is-render-local-mode #phone-preview-wrapper {
+  width: 1080px !important;
+  height: 1920px !important;
+  max-width: none !important;
+  transform: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.is-render-local-mode #phone-preview-phone {
+  width: 1080px !important;
+  height: 1920px !important;
+  max-height: none !important;
+  max-width: none !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide everything else on the page during local rendering */
+body.is-render-local-mode main,
+body.is-render-local-mode sidebar,
+body.is-render-local-mode header,
+body.is-render-local-mode footer,
+body.is-render-local-mode button,
+body.is-render-local-mode section:not(#phone-preview-section) {
+  display: none !important;
+}
+
+
 

@@ -292,6 +292,83 @@ const base64ToBlobUrl = (b64: string, mime = "audio/mpeg") => {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 };
 
+function audioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+  const numOfChan = buffer.numberOfChannels;
+  const length = buffer.length * numOfChan * 2 + 44;
+  const bufferArr = new ArrayBuffer(length);
+  const view = new DataView(bufferArr);
+  const channels = [];
+  let i;
+  let sample;
+  let offset = 0;
+  let pos = 0;
+
+  function setUint16(data: number) {
+    view.setUint16(pos, data, true);
+    pos += 2;
+  }
+
+  function setUint32(data: number) {
+    view.setUint32(pos, data, true);
+    pos += 4;
+  }
+
+  setUint32(0x46464952); // "RIFF"
+  setUint32(length - 8); // file length - 8
+  setUint32(0x45564157); // "WAVE"
+  setUint32(0x20746d66); // "fmt " chunk
+  setUint32(16); // chunk length
+  setUint16(1); // sample format (raw)
+  setUint16(numOfChan);
+  setUint32(buffer.sampleRate);
+  setUint32(buffer.sampleRate * 2 * numOfChan); // byte rate
+  setUint16(numOfChan * 2); // block align
+  setUint16(16); // bits per sample
+  setUint32(0x61746164); // "data" chunk
+  setUint32(length - pos - 4); // chunk length
+
+  for (i = 0; i < buffer.numberOfChannels; i++) {
+    channels.push(buffer.getChannelData(i));
+  }
+
+  while (pos < length) {
+    for (i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  return bufferArr;
+}
+
+const startLocalRenderServerFn = createServerFn({ method: "POST" })
+  .validator((data: { projectJson: string }) => data)
+  .handler(async ({ data }) => {
+    const { exec } = await import("child_process");
+    const fs = await import("fs");
+    const path = await import("path");
+    
+    const cwd = process.cwd();
+    const tempJsonPath = path.join(cwd, `temp_project_${Date.now()}.json`);
+    fs.writeFileSync(tempJsonPath, data.projectJson, 'utf8');
+    
+    const command = `start cmd.exe /c "cd /d ${cwd} && node render.js ${tempJsonPath}"`;
+    
+    return new Promise<{ success: boolean; error?: string }>((resolve) => {
+      exec(command, (error) => {
+        if (error) {
+          console.error("Erro ao iniciar o renderizador local:", error);
+          resolve({ success: false, error: error.message });
+        } else {
+          resolve({ success: true });
+        }
+      });
+    });
+  });
+
 const startOmniVoiceServerFn = createServerFn({ method: "POST" })
   .handler(async () => {
     const { exec } = await import("child_process");
@@ -499,6 +576,116 @@ export default function ChatStoryGenerator() {
       }
     } else {
       setActiveBgBlobUrl("");
+    }
+  }, [activeBackground]);
+
+  const [isRenderLocalActive, setIsRenderLocalActive] = useState(false);
+  const [localExportProgress, setLocalExportProgress] = useState(0);
+  const [isLocalExporting, setIsLocalExporting] = useState(false);
+
+  useEffect(() => {
+    const isRender = typeof window !== "undefined" && window.location.pathname === "/render-local";
+    if (isRender) {
+      setIsRenderLocalActive(true);
+      document.body.classList.add("is-render-local-mode");
+      
+      console.log("Render mode active. Exposing global methods...");
+      
+      (window as any).initRenderLocal = (data: any) => {
+        console.log("initRenderLocal called", data);
+        setProjectName(data.projectName || "chat-story");
+        setChatTheme(data.chatTheme || "imessage");
+        setChats(data.chats || []);
+        setActiveBackground(data.activeBackground || "#9333ea");
+        setBgVideoOffset(data.bgVideoOffset || 0);
+      };
+
+      (window as any).renderFrameLocal = async (timeSec: number) => {
+        if (!(window as any).projectData) return;
+        const data = (window as any).projectData;
+        const msgList = data.messages || [];
+        const startTimes = data.startTimesSec || [];
+        const currentChatTheme = data.chatTheme || "imessage";
+
+        let visibleIdx = -1;
+        for (let idx = 0; idx < msgList.length; idx++) {
+          if (startTimes[idx] <= timeSec) {
+            visibleIdx = idx;
+          } else {
+            break;
+          }
+        }
+
+        const visibleSlice = msgList.slice(0, visibleIdx + 1);
+        setVisibleMessages(visibleSlice);
+
+        if (visibleSlice.length > 0) {
+          const lastMsg = visibleSlice[visibleSlice.length - 1];
+          const lastMsgChatId = lastMsg.chatId || (data.chats?.[0]?.id);
+          if (lastMsgChatId) {
+            setPlayingChatId(lastMsgChatId);
+            setActiveChatId(lastMsgChatId);
+          }
+        }
+
+        await new Promise((r) => requestAnimationFrame(r));
+        const scrollEl = chatScrollRef.current;
+        if (scrollEl) {
+          scrollEl.scrollTop = scrollEl.scrollHeight;
+        }
+
+        const bgVideo = document.querySelector("video.bg-video-el") as HTMLVideoElement;
+        if (bgVideo) {
+          const dur = bgVideo.duration || 1;
+          const target = (timeSec + (data.bgVideoOffset || 0)) % dur;
+          
+          await new Promise<void>((resolve) => {
+            const onSeeked = () => {
+              bgVideo.removeEventListener("seeked", onSeeked);
+              resolve();
+            };
+            bgVideo.addEventListener("seeked", onSeeked);
+            bgVideo.currentTime = target;
+            setTimeout(() => {
+              bgVideo.removeEventListener("seeked", onSeeked);
+              resolve();
+            }, 100);
+          });
+        }
+
+        const bubbleVideos = document.querySelectorAll("video:not(.bg-video-el)");
+        const seekPromises = Array.from(bubbleVideos).map((video) => {
+          const url = video.getAttribute("src") || "";
+          const placeholder = document.querySelector(`[data-video-src="${url}"]`);
+          if (!placeholder) return Promise.resolve();
+
+          const msgIdAttr = placeholder.getAttribute("data-msg-id");
+          const msgId = msgIdAttr ? parseInt(msgIdAttr, 10) : -1;
+          const msgIndex = msgList.findIndex((m: any) => m.id === msgId);
+          const videoStartSec = msgIndex >= 0 ? startTimes[msgIndex] : 0;
+          const elapsed = timeSec - videoStartSec;
+
+          return new Promise<void>((resolve) => {
+            const el = video as HTMLVideoElement;
+            const onSeeked = () => {
+              el.removeEventListener("seeked", onSeeked);
+              resolve();
+            };
+            el.addEventListener("seeked", onSeeked);
+            el.currentTime = Math.max(0, elapsed);
+            setTimeout(() => {
+              el.removeEventListener("seeked", onSeeked);
+              resolve();
+            }, 100);
+          });
+        });
+
+        await Promise.all(seekPromises);
+      };
+
+      return () => {
+        document.body.classList.remove("is-render-local-mode");
+      };
     }
   }, [activeBackground]);
 
@@ -3205,6 +3392,157 @@ Regras CRÍTICAS:
     }
   };
 
+  const exportVideoLocal = async (exportAll?: boolean) => {
+    if (!previewRef.current) return;
+    if (!allAudiosReady) {
+      alert("Gere os áudios primeiro.");
+      return;
+    }
+
+    const messages = exportAll
+      ? chats.flatMap((c) => c.messages.map((m) => ({ ...m, chatId: c.id })))
+      : displayChat.messages;
+    if (messages.length === 0) return;
+
+    setIsLocalExporting(true);
+    setLocalExportProgress(5);
+
+    try {
+      // 1) Mix audio offline
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AC();
+      const tracksInfo: { duration: number; buffer: AudioBuffer | null }[] = [];
+      const delaySec = (Number(messageDelay) || 0) / 1000;
+      let totalDurationSec = 0;
+
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (msg.type === "image") {
+          tracksInfo.push({ buffer: null, duration: 2.0 });
+          totalDurationSec += 2.0;
+          continue;
+        }
+        if (msg.type === "video") {
+          const url = msg.videoUrl;
+          if (url) {
+            try {
+              const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+              const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+              const durationSec = audioBuffer.duration;
+              tracksInfo.push({ buffer: audioBuffer, duration: durationSec });
+              totalDurationSec += durationSec;
+            } catch (videoAudioErr) {
+              const durationSec = await getVideoDuration(url);
+              tracksInfo.push({ buffer: null, duration: durationSec });
+              totalDurationSec += durationSec;
+            }
+          } else {
+            tracksInfo.push({ buffer: null, duration: 3.0 });
+            totalDurationSec += 3.0;
+          }
+          continue;
+        }
+        const url = msg.type === "text" ? (msg as any).audioUrl : null;
+        if (!url) {
+          tracksInfo.push({ buffer: null, duration: 2.5 });
+          totalDurationSec += 2.5;
+          continue;
+        }
+        try {
+          const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          const step = Math.max(0.1, audioBuffer.duration + delaySec);
+          tracksInfo.push({ buffer: audioBuffer, duration: step });
+          totalDurationSec += step;
+        } catch (decodeErr) {
+          tracksInfo.push({ buffer: null, duration: 2.0 });
+          totalDurationSec += 2.0;
+        }
+      }
+      totalDurationSec = Math.max(1, totalDurationSec + 1);
+
+      setLocalExportProgress(20);
+
+      const offlineCtx = new OfflineAudioContext(
+        1,
+        Math.ceil(48000 * totalDurationSec),
+        48000,
+      );
+      let currentTime = 0;
+      for (const track of tracksInfo) {
+        if (track.buffer) {
+          const src = offlineCtx.createBufferSource();
+          src.buffer = track.buffer;
+          src.connect(offlineCtx.destination);
+          src.start(currentTime);
+        }
+        currentTime += track.duration;
+      }
+      const renderedAudio = await offlineCtx.startRendering();
+      try { audioCtx.close(); } catch {}
+
+      setLocalExportProgress(40);
+
+      // Convert mixed AudioBuffer to WAV base64
+      const wavArrBuffer = audioBufferToWav(renderedAudio);
+      const bytes = new Uint8Array(wavArrBuffer);
+      let binary = "";
+      for (let j = 0; j < bytes.byteLength; j++) {
+        binary += String.fromCharCode(bytes[j]);
+      }
+      const audioBase64 = btoa(binary);
+
+      setLocalExportProgress(60);
+
+      const startTimesSec: number[] = [];
+      let currentAcc = 0;
+      for (let j = 0; j < messages.length; j++) {
+        startTimesSec.push(currentAcc);
+        currentAcc += tracksInfo[j].duration;
+      }
+
+      // Gather full payload for local node renderer
+      const payload = {
+        origin: window.location.origin,
+        fps: exportFps,
+        duration: totalDurationSec,
+        projectName: projectName,
+        chatTheme: chatTheme,
+        activeBackground: activeBackground,
+        bgVideoOffset: bgVideoOffset,
+        chats: chats.map(c => ({
+          id: c.id,
+          name: c.name,
+          contactName: c.contactName,
+          contactPhoto: c.contactPhoto,
+          messages: c.messages
+        })),
+        messages: messages,
+        startTimesSec: startTimesSec,
+        audioBase64: audioBase64,
+        outputName: (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_")
+      };
+
+      setLocalExportProgress(80);
+
+      // Trigger the local renderer!
+      const res = await startLocalRenderServerFn({ data: { projectJson: JSON.stringify(payload) } });
+      
+      if (res.success) {
+        setLocalExportProgress(100);
+        toast.success("Vídeo exportado pelo PC e salvo na pasta Downloads!");
+      } else {
+        throw new Error(res.error || "Erro ao rodar renderizador no Prompt");
+      }
+    } catch (err) {
+      console.error("Local Export Failed:", err);
+      toast.error(`Falha na exportação pelo PC: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLocalExporting(false);
+      setLocalExportProgress(0);
+    }
+  };
+
   const addChat = () => {
     const next = newChat(chats.length + 1);
     setChats((p) => [...p, next]);
@@ -4918,7 +5256,7 @@ Regras CRÍTICAS:
                 <div className="flex flex-col gap-3 pt-3">
                   <Button
                     onClick={() => exportVideoFast(false)}
-                    disabled={!allAudiosReady || playing || recording}
+                    disabled={!allAudiosReady || playing || recording || isLocalExporting}
                     size="lg"
                     className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs h-12 shadow-lg shadow-purple-600/10"
                   >
@@ -4937,12 +5275,46 @@ Regras CRÍTICAS:
 
                   <Button
                     onClick={() => exportVideoFast(true)}
-                    disabled={!allAudiosReady || playing || recording}
+                    disabled={!allAudiosReady || playing || recording || isLocalExporting}
                     size="lg"
                     className="w-full text-xs h-11"
                     variant="outline"
                   >
                     Exportar Vídeo (Todos os Chats)
+                  </Button>
+
+                  <div className="relative flex items-center justify-center my-3">
+                    <span className="absolute px-3 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">ou pelo seu Computador</span>
+                    <hr className="w-full border-zinc-800" />
+                  </div>
+
+                  <Button
+                    onClick={() => exportVideoLocal(false)}
+                    disabled={!allAudiosReady || playing || recording || isLocalExporting}
+                    size="lg"
+                    className="w-full bg-emerald-650 hover:bg-emerald-600 text-white font-semibold text-xs h-12 shadow-lg shadow-emerald-600/10"
+                  >
+                    {isLocalExporting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Exportando no PC... {Math.round(localExportProgress)}%
+                      </>
+                    ) : (
+                      <>
+                        <Cpu className="mr-2 h-4 w-4" />
+                        Exportar via PC (Chat Ativo) 🖥️
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={() => exportVideoLocal(true)}
+                    disabled={!allAudiosReady || playing || recording || isLocalExporting}
+                    size="lg"
+                    className="w-full text-xs h-11 text-emerald-400 hover:text-emerald-350 border-emerald-900/50 hover:bg-emerald-950/20"
+                    variant="outline"
+                  >
+                    Exportar via PC (Todos os Chats)
                   </Button>
                 </div>
               </div>
@@ -5215,9 +5587,10 @@ Regras CRÍTICAS:
           </main>
 
           {/* 3. STICKY PREVIEW DO CELULAR */}
-          <section className="hidden lg:flex w-[450px] shrink-0 border-l border-zinc-850 bg-zinc-900/10 p-6 flex-col justify-center items-center sticky top-0 h-full overflow-hidden">
+          <section id="phone-preview-section" className="hidden lg:flex w-[450px] shrink-0 border-l border-zinc-850 bg-zinc-900/10 p-6 flex-col justify-center items-center sticky top-0 h-full overflow-hidden">
             <div className="relative aspect-[9/16] w-full max-w-[370px]">
               <div
+                id="phone-preview-wrapper"
                 ref={previewRef}
                 className="w-full h-full flex items-center justify-center relative overflow-hidden"
                 style={{
@@ -5263,6 +5636,7 @@ Regras CRÍTICAS:
                   />
                 )}
                 <div
+                  id="phone-preview-phone"
                   className="w-[92%] h-fit max-h-[68%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800 z-10"
                   style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
                 >
