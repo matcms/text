@@ -6,6 +6,18 @@ import { toCanvas } from "html-to-image";
 import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 import { Progress } from "@/components/ui/progress";
 
+function dataURLtoBlob(dataurl: string): Blob {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)?.[1] || "video/mp4";
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
 const VideoBubble = ({
   src,
   recording,
@@ -470,6 +482,25 @@ export default function ChatStoryGenerator() {
   const activeBgVideoRef = useRef<HTMLVideoElement | null>(null);
   const [exportFps, setExportFps] = useState<number>(30);
   const [bgVideoResolution, setBgVideoResolution] = useState<string>("");
+  const [activeBgBlobUrl, setActiveBgBlobUrl] = useState<string>("");
+
+  useEffect(() => {
+    if (activeBackground.startsWith("data:video/")) {
+      try {
+        const blob = dataURLtoBlob(activeBackground);
+        const url = URL.createObjectURL(blob);
+        setActiveBgBlobUrl(url);
+        return () => {
+          URL.revokeObjectURL(url);
+        };
+      } catch (e) {
+        console.error("Failed to create blob url for background", e);
+        setActiveBgBlobUrl(activeBackground);
+      }
+    } else {
+      setActiveBgBlobUrl("");
+    }
+  }, [activeBackground]);
 
   useEffect(() => {
     (async () => {
@@ -2566,18 +2597,35 @@ Regras CRÍTICAS:
     }
 
     const videoCache = new Map<string, HTMLVideoElement>();
+    const blobUrlsCache: Record<string, string> = {};
     const isWA = chatTheme === "whatsapp";
 
     const getVideoElement = async (url: string): Promise<HTMLVideoElement> => {
-      if (videoCache.has(url)) {
-        return videoCache.get(url)!;
+      let finalUrl = url;
+      if (url.startsWith("data:video/")) {
+        if (blobUrlsCache[url]) {
+          finalUrl = blobUrlsCache[url];
+        } else {
+          try {
+            const blob = dataURLtoBlob(url);
+            const blobUrl = URL.createObjectURL(blob);
+            blobUrlsCache[url] = blobUrl;
+            finalUrl = blobUrl;
+          } catch (e) {
+            console.error("Failed to convert dataURL to BlobURL", e);
+          }
+        }
+      }
+
+      if (videoCache.has(finalUrl)) {
+        return videoCache.get(finalUrl)!;
       }
       const video = document.createElement("video");
-      video.src = url;
+      video.src = finalUrl;
       video.muted = true;
       video.crossOrigin = "anonymous";
       video.playsInline = true;
-      videoCache.set(url, video);
+      videoCache.set(finalUrl, video);
       
       await new Promise<void>((resolve, reject) => {
         const onLoaded = () => {
@@ -3128,6 +3176,14 @@ Regras CRÍTICAS:
       alert(`Falha na Exportação: ${errorMsg}`);
     } finally {
       // Clean up cached video elements
+      if (typeof blobUrlsCache !== "undefined" && blobUrlsCache) {
+        for (const url of Object.values(blobUrlsCache)) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        }
+      }
+
       if (typeof videoCache !== "undefined" && videoCache) {
         for (const video of videoCache.values()) {
           try {
@@ -5198,7 +5254,7 @@ Regras CRÍTICAS:
                         }
                       }
                     }}
-                    src={activeBackground}
+                    src={activeBgBlobUrl || activeBackground}
                     autoPlay
                     loop
                     muted
