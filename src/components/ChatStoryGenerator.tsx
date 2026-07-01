@@ -2736,7 +2736,7 @@ Regras CRÍTICAS:
         error: (e: any) => console.error("Video error:", e),
       });
       videoEncoder.configure({
-        codec: "avc1.42001e",
+        codec: "avc1.4d002a",
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
