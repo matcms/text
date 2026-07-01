@@ -2726,7 +2726,7 @@ Regras CRÍTICAS:
       // 2) Setup muxer + encoders
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: "V_VP8", width: 1080, height: 1920 },
+        video: { codec: "V_VP9", width: 1080, height: 1920 },
         audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
       });
 
@@ -2735,10 +2735,11 @@ Regras CRÍTICAS:
         error: (e: any) => console.error("Video error:", e),
       });
       videoEncoder.configure({
-        codec: "vp8",
+        codec: "vp09.00.10.08",
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
+        hardwareAcceleration: "prefer-hardware",
       });
 
       const audioEncoder = new (window as any).AudioEncoder({
