@@ -3483,14 +3483,19 @@ Regras CRÍTICAS:
 
       setLocalExportProgress(40);
 
-      // Convert mixed AudioBuffer to WAV base64
+      // Convert mixed AudioBuffer to WAV base64 (using native FileReader to avoid Out of Memory)
       const wavArrBuffer = audioBufferToWav(renderedAudio);
-      const bytes = new Uint8Array(wavArrBuffer);
-      let binary = "";
-      for (let j = 0; j < bytes.byteLength; j++) {
-        binary += String.fromCharCode(bytes[j]);
-      }
-      const audioBase64 = btoa(binary);
+      const audioBlob = new Blob([wavArrBuffer], { type: "audio/wav" });
+      const audioBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          const base64 = base64data.split(",")[1];
+          resolve(base64);
+        };
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(audioBlob);
+      });
 
       setLocalExportProgress(60);
 
