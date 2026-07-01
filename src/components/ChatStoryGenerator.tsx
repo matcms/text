@@ -505,7 +505,17 @@ export default function ChatStoryGenerator() {
 
   const [chats, setChats] = useState<Chat[]>([newChat(1)]);
   const [activeChatId, setActiveChatId] = useState<string>(chats[0].id);
-  const activeChat = chats.find((c) => c.id === activeChatId) || chats[0] || { id: "", name: "", contactName: "", contactPhoto: null, messages: [] };
+  const activeChat = chats.find((c) => c.id === activeChatId) || chats[0] || {
+    id: "",
+    name: "",
+    contactName: "",
+    contactPhoto: null,
+    messages: [],
+    voiceMap: {},
+    nameColors: {},
+    characterPhotos: {},
+    characterAudios: {}
+  };
 
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState({ done: 0, total: 0 });
