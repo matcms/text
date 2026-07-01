@@ -3623,10 +3623,7 @@ Regras CRÍTICAS:
         activeBackground: bgVideoFilename ? bgVideoFilename : activeBackground,
         bgVideoOffset: bgVideoOffset,
         chats: chats.map(c => ({
-          id: c.id,
-          name: c.name,
-          contactName: c.contactName,
-          contactPhoto: c.contactPhoto,
+          ...c,
           messages: c.messages.map(m => {
             const msgIdx = messages.findIndex(orig => orig.id === m.id);
             if (m.type === "video" && msgIdx >= 0) {
