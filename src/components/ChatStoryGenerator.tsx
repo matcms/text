@@ -286,7 +286,7 @@ const startOmniVoiceServerFn = createServerFn({ method: "POST" })
     const cwd = process.cwd();
     const command = `start cmd.exe /k "cd /d ${cwd} && venv\\Scripts\\activate && python tts_server.py"`;
     
-    return new Promise((resolve) => {
+    return new Promise<{ success: boolean; error?: string }>((resolve) => {
       exec(command, (error) => {
         if (error) {
           console.error("Erro ao iniciar o servidor OmniVoice:", error);
@@ -300,6 +300,15 @@ const startOmniVoiceServerFn = createServerFn({ method: "POST" })
 
 export default function ChatStoryGenerator() {
   const [elevenKey, setElevenKey] = useState("");
+  const [elevenModel, setElevenModel] = useState("eleven_multilingual_v2");
+  const [elevenModels, setElevenModels] = useState<{ model_id: string; name: string }[]>([
+    { model_id: "eleven_multilingual_v2", name: "Eleven Multilingual v2" },
+    { model_id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5" },
+    { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5" },
+    { model_id: "eleven_turbo_v2", name: "Eleven Turbo v2" },
+    { model_id: "eleven_monolingual_v1", name: "Eleven Monolingual v1" },
+    { model_id: "eleven_flash_v2", name: "Eleven Flash v2" },
+  ]);
   const [ttsProvider, setTtsProvider] = useState<"elevenlabs" | "omnivoice" | "qwen3">("elevenlabs");
   const [omniVoiceUrl, setOmniVoiceUrl] = useState("http://localhost:8000");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
@@ -455,6 +464,11 @@ export default function ChatStoryGenerator() {
   const [activeBackground, setActiveBackground] = useState<string>("#9333ea");
   const [newColor, setNewColor] = useState<string>("#ff0066");
   const bgFileInputRef = useRef<HTMLInputElement | null>(null);
+  const bgVideoInputRef = useRef<HTMLInputElement | null>(null);
+  const [bgVideoOffset, setBgVideoOffset] = useState<number>(0); // Video background start offset in seconds
+  const [bgVideoDuration, setBgVideoDuration] = useState<number>(0);
+  const activeBgVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [exportFps, setExportFps] = useState<number>(60);
 
   useEffect(() => {
     (async () => {
@@ -491,6 +505,28 @@ export default function ChatStoryGenerator() {
       const bg: StoredBackground = {
         id: `i_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         type: "image",
+        value: dataUrl,
+        createdAt: Date.now(),
+      };
+      try {
+        await saveBackground(bg);
+      } catch (e) {
+        console.error(e);
+      }
+      setBackgrounds((p) => [...p, bg]);
+      setActiveBackground(bg.value);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const addVideoBackground = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl) return;
+      const bg: StoredBackground = {
+        id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: "video",
         value: dataUrl,
         createdAt: Date.now(),
       };
@@ -707,10 +743,26 @@ export default function ChatStoryGenerator() {
     setOpenaiModel(localStorage.getItem("openai_model") || "gpt-4o-mini");
     setOmniNumStep(Number(localStorage.getItem("omni_num_step")) || 32);
     setOmniGuidanceScale(Number(localStorage.getItem("omni_guidance_scale")) || 2.0);
+    setBgVideoOffset(Number(localStorage.getItem("bg_video_offset")) || 0);
+    setExportFps(Number(localStorage.getItem("export_fps")) || 60);
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
   }, [elevenKey]);
+  useEffect(() => {
+    localStorage.setItem("elevenlabs_model", elevenModel);
+  }, [elevenModel]);
+  useEffect(() => {
+    if (elevenKey) {
+      fetchElevenModels();
+    }
+  }, [elevenKey]);
+  useEffect(() => {
+    localStorage.setItem("bg_video_offset", String(bgVideoOffset));
+  }, [bgVideoOffset]);
+  useEffect(() => {
+    localStorage.setItem("export_fps", String(exportFps));
+  }, [exportFps]);
   useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
@@ -1089,6 +1141,27 @@ export default function ChatStoryGenerator() {
   };
 
   // ---- TTS providers ----
+  const fetchElevenModels = async () => {
+    if (!elevenKey) return;
+    try {
+      const res = await fetch("https://api.elevenlabs.io/v1/models", {
+        headers: { "xi-api-key": elevenKey },
+      });
+      if (!res.ok) throw new Error(`ElevenLabs models error: ${await res.text()}`);
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.models || []);
+      if (list && list.length > 0) {
+        const formatted = list.map((m: any) => ({
+          model_id: m.model_id,
+          name: m.name || m.model_id,
+        }));
+        setElevenModels(formatted);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar modelos do ElevenLabs:", err);
+    }
+  };
+
   const fetchElevenVoices = async (): Promise<Record<string, string>> => {
     if (elevenVoicesRef.current) return elevenVoicesRef.current;
     const res = await fetch("https://api.elevenlabs.io/v1/voices", {
@@ -1113,7 +1186,7 @@ export default function ChatStoryGenerator() {
         headers: { "xi-api-key": elevenKey, "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          model_id: "eleven_multilingual_v2",
+          model_id: elevenModel || "eleven_multilingual_v2",
           voice_settings: {
             stability: 0.5,
             similarity_boost: 0.75,
@@ -1242,8 +1315,9 @@ export default function ChatStoryGenerator() {
       return;
     }
 
+    let apiKey = "";
     if (directorLlmProvider !== "local") {
-      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
       if (!apiKey.trim()) {
         alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações.`);
         return;
@@ -1419,8 +1493,9 @@ Analise o fluxo do chat para garantir consistência no diálogo (se um personage
   };
 
   const generateScriptWithAI = async (isContinuation: boolean) => {
+    let apiKey = "";
     if (directorLlmProvider !== "local") {
-      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
       if (!apiKey.trim()) {
         alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações avançadas.`);
         return;
@@ -1709,8 +1784,9 @@ Regras CRÍTICAS:
       return;
     }
 
+    let apiKey = "";
     if (directorLlmProvider !== "local") {
-      const apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
+      apiKey = directorLlmProvider === "gemini" ? geminiApiKey : openaiApiKey;
       if (!apiKey.trim()) {
         alert(`Por favor, insira sua API Key do ${directorLlmProvider === "gemini" ? "Gemini" : "OpenAI"} nas configurações avançadas.`);
         return;
@@ -2231,7 +2307,19 @@ Regras CRÍTICAS:
     elapsedTimerRef.current = setInterval(() => {
       if (!pausedRef.current) {
         const now = Date.now();
-        setPlaybackElapsed(now - playbackStartTimeRef.current - pauseAccumulatorRef.current);
+        const elapsed = now - playbackStartTimeRef.current - pauseAccumulatorRef.current;
+        setPlaybackElapsed(elapsed);
+
+        // Keep DOM video background synced in preview
+        if (activeBackground.startsWith("data:video/") && activeBgVideoRef.current) {
+          const bgVideo = activeBgVideoRef.current;
+          const currentSec = (elapsed / 1000) + bgVideoOffset;
+          const dur = bgVideo.duration || 1;
+          const target = currentSec % dur;
+          if (Math.abs(bgVideo.currentTime - target) > 0.3) {
+            bgVideo.currentTime = target;
+          }
+        }
       }
     }, 200);
 
@@ -2387,6 +2475,11 @@ Regras CRÍTICAS:
     const videos = previewRef.current?.querySelectorAll("video");
     if (videos) {
       videos.forEach((video) => {
+        if (video.classList.contains("bg-video-el")) {
+          if (next) video.pause();
+          else video.play().catch(() => {});
+          return;
+        }
         if (next) video.pause();
         else video.play().catch(() => {});
       });
@@ -2511,6 +2604,25 @@ Regras CRÍTICAS:
       // Seek at most to duration - 0.05 to freeze on the last frame instead of looping.
       // Clamp between 0 and duration, handling very short videos safely.
       const targetTime = Math.max(0, Math.min(time, Math.max(0.01, duration - 0.05)));
+      
+      return new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        video.currentTime = targetTime;
+        
+        setTimeout(() => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        }, 150);
+      });
+    };
+
+    const seekVideoLoop = async (video: HTMLVideoElement, time: number) => {
+      const duration = video.duration || 1;
+      const targetTime = (time + bgVideoOffset) % duration;
       
       return new Promise<void>((resolve) => {
         const onSeeked = () => {
@@ -2703,7 +2815,7 @@ Regras CRÍTICAS:
       if (chatInnerRef.current) chatInnerRef.current.style.transform = "translateY(0px)";
       await new Promise((r) => setTimeout(r, 300));
 
-      const fps = 30;
+      const fps = exportFps;
       let timestampUs = 0;
       let framesEncoded = 0;
       const canvas1080 = document.createElement("canvas");
@@ -2797,6 +2909,9 @@ Regras CRÍTICAS:
             skipFonts: true, // CRITICAL: prevents font loading Event timeouts
             useCORS: true,
             filter: (node: any) => {
+              if (node?.tagName?.toLowerCase() === "video" && node.classList?.contains("bg-video-el")) {
+                return false;
+              }
               return node?.tagName?.toLowerCase() !== "iframe";
             },
           } as any);
@@ -2824,6 +2939,32 @@ Regras CRÍTICAS:
         for (let f = 0; f < framesToEncode; f++) {
           // Clear and restore static background
           ctx1080.clearRect(0, 0, 1080, 1920);
+          
+          if (activeBackground.startsWith("data:video/")) {
+            try {
+              const bgVideo = await getVideoElement(activeBackground);
+              const currentFrameTimeSec = timestampUs / 1_000_000;
+              await seekVideoLoop(bgVideo, currentFrameTimeSec);
+              
+              // Draw video background with cover-fit crop
+              const imgW = bgVideo.videoWidth || 1080;
+              const imgH = bgVideo.videoHeight || 1920;
+              const imgRatio = imgW / imgH;
+              const targetRatio = 1080 / 1920;
+              let sx = 0, sy = 0, sw = imgW, sh = imgH;
+              if (imgRatio > targetRatio) {
+                sw = imgH * targetRatio;
+                sx = (imgW - sw) / 2;
+              } else {
+                sh = imgW / targetRatio;
+                sy = (imgH - sh) / 2;
+              }
+              ctx1080.drawImage(bgVideo, sx, sy, sw, sh, 0, 0, 1080, 1920);
+            } catch (err) {
+              console.warn("Failed to draw background video frame", err);
+            }
+          }
+          
           ctx1080.drawImage(staticBitmap, 0, 0);
 
           if (measuredPlaceholders.length > 0) {
@@ -3137,27 +3278,35 @@ Regras CRÍTICAS:
                   <div className="flex flex-wrap gap-2">
                     {backgrounds.map((bg) => {
                       const isActive = activeBackground === bg.value;
-                      const style: CSSProperties =
-                        bg.type === "color"
-                          ? { backgroundColor: bg.value }
-                          : {
-                              backgroundImage: `url(${bg.value})`,
-                              backgroundSize: "cover",
-                              backgroundPosition: "center",
-                            };
                       return (
                         <div key={bg.id} className="relative">
                           <button
                             type="button"
                             onClick={() => setActiveBackground(bg.value)}
-                            className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all ${
+                            className={`w-10 h-10 rounded-md cursor-pointer border-2 transition-all overflow-hidden relative flex items-center justify-center ${
                               isActive
                                 ? "border-purple-500 ring-2 ring-purple-500 scale-105"
                                 : "border-zinc-800 hover:border-zinc-700"
                             }`}
-                            style={style}
-                            title={bg.type === "color" ? bg.value : "Custom image"}
-                          />
+                            title={bg.type === "color" ? bg.value : bg.type === "video" ? "Custom video" : "Custom image"}
+                          >
+                            {bg.type === "color" && (
+                              <div className="w-full h-full" style={{ backgroundColor: bg.value }} />
+                            )}
+                            {bg.type === "image" && (
+                              <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url(${bg.value})` }} />
+                            )}
+                            {bg.type === "video" && (
+                              <video
+                                src={bg.value}
+                                muted
+                                loop
+                                autoPlay
+                                playsInline
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </button>
                           {!bg.id.startsWith("default-") && (
                             <button
                               type="button"
@@ -3207,7 +3356,59 @@ Regras CRÍTICAS:
                         <Upload className="w-3.5 h-3.5 mr-1.5" /> Enviar Imagem
                       </Button>
                     </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={bgVideoInputRef}
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) addVideoBackground(f);
+                          if (bgVideoInputRef.current) bgVideoInputRef.current.value = "";
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => bgVideoInputRef.current?.click()}
+                        className="h-8"
+                      >
+                        <Upload className="w-3.5 h-3.5 mr-1.5" /> Enviar Vídeo
+                      </Button>
+                    </div>
                   </div>
+
+                  {activeBackground.startsWith("data:video/") && (
+                    <div className="space-y-2 pt-3 border-t border-zinc-800/40">
+                      <div className="flex items-center justify-between text-xs">
+                        <Label className="text-zinc-300">Início do vídeo de fundo (offset)</Label>
+                        <span className="text-zinc-400 font-mono">
+                          {bgVideoOffset}s {bgVideoDuration > 0 && `(Total: ${Math.round(bgVideoDuration)}s)`}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min={0}
+                          max={bgVideoDuration > 0 ? Math.round(bgVideoDuration) : 1200}
+                          step={1}
+                          value={bgVideoOffset}
+                          onChange={(e) => setBgVideoOffset(Number(e.target.value))}
+                          className="flex-1 h-1.5 bg-zinc-850 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          max={bgVideoDuration > 0 ? Math.round(bgVideoDuration) : 1200}
+                          value={bgVideoOffset}
+                          onChange={(e) => setBgVideoOffset(Math.max(0, Number(e.target.value)))}
+                          className="w-16 h-8 bg-zinc-950 border-zinc-800 text-zinc-300 text-xs px-1 text-center"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Gerenciamento de Chats */}
@@ -4572,7 +4773,7 @@ Regras CRÍTICAS:
                   <p className="text-xs text-zinc-400">Configure limites de renderização e grave o vídeo do chat finalizado.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
                     <Label className="text-xs text-zinc-350">Gravar a partir do índice</Label>
                     <Input
@@ -4594,6 +4795,21 @@ Regras CRÍTICAS:
                       onChange={(e) => setExportScroll(Number(e.target.value) || 0)}
                       className="bg-zinc-950 border-zinc-800 text-xs h-8"
                     />
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <Label className="text-xs text-zinc-350">Taxa de Quadros (FPS)</Label>
+                    <select
+                      value={exportFps}
+                      onChange={(e) => setExportFps(Number(e.target.value))}
+                      className="w-full h-8 rounded border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                    >
+                      <option value={30}>30 FPS</option>
+                      <option value={60}>60 FPS</option>
+                    </select>
+                    <p className="text-[9px] text-zinc-450 leading-tight">
+                      Taxa de quadros do vídeo final. 60 FPS oferece animações mais fluidas.
+                    </p>
                   </div>
                 </div>
 
@@ -4689,15 +4905,41 @@ Regras CRÍTICAS:
                   </div>
 
                   {ttsProvider === "elevenlabs" ? (
-                    <div className="space-y-2">
-                      <Label className="text-xs text-zinc-300">ElevenLabs API Key</Label>
-                      <Input
-                        type="password"
-                        value={elevenKey}
-                        onChange={(e) => setElevenKey(e.target.value)}
-                        placeholder="sk_..."
-                        className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
-                      />
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-zinc-300">ElevenLabs API Key</Label>
+                        <Input
+                          type="password"
+                          value={elevenKey}
+                          onChange={(e) => setElevenKey(e.target.value)}
+                          placeholder="sk_..."
+                          className="bg-zinc-950 border-zinc-800 text-zinc-200 h-9"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-zinc-300">Modelo ElevenLabs</Label>
+                          <button
+                            type="button"
+                            onClick={fetchElevenModels}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                            disabled={!elevenKey}
+                          >
+                            Recarregar Modelos
+                          </button>
+                        </div>
+                        <select
+                          className="w-full h-9 rounded border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-200"
+                          value={elevenModel}
+                          onChange={(e) => setElevenModel(e.target.value)}
+                        >
+                          {elevenModels.map((m) => (
+                            <option key={m.model_id} value={m.model_id}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-2 border-t border-zinc-800/40">
@@ -4879,6 +5121,8 @@ Regras CRÍTICAS:
                 style={{
                   background: activeBackground.startsWith("data:image")
                     ? `url(${activeBackground}) center/cover no-repeat`
+                    : activeBackground.startsWith("data:video/")
+                    ? "transparent"
                     : activeBackground,
                 }}
                 onWheel={(e) => {
@@ -4894,8 +5138,29 @@ Regras CRÍTICAS:
                   });
                 }}
               >
+                {activeBackground.startsWith("data:video/") && (
+                  <video
+                    ref={(el) => {
+                      activeBgVideoRef.current = el;
+                      if (el) {
+                        el.onloadedmetadata = () => {
+                          setBgVideoDuration(el.duration);
+                        };
+                        if (el.currentTime !== bgVideoOffset && !playing) {
+                          el.currentTime = bgVideoOffset % (el.duration || 1);
+                        }
+                      }
+                    }}
+                    src={activeBackground}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="bg-video-el absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
+                  />
+                )}
                 <div
-                  className="w-[92%] h-fit max-h-[68%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800"
+                  className="w-[92%] h-fit max-h-[68%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800 z-10"
                   style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
                 >
                   {/* Header */}

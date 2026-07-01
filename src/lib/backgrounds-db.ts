@@ -5,7 +5,7 @@ const VERSION = 1;
 
 export type StoredBackground = {
   id: string;
-  type: "color" | "image";
+  type: "color" | "image" | "video";
   value: string; // hex color or base64 data URL
   createdAt: number;
 };
