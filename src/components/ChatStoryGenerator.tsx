@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { toCanvas } from "html-to-image";
-import { Muxer, ArrayBufferTarget } from "webm-muxer";
+import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 import { Progress } from "@/components/ui/progress";
 
 const VideoBubble = ({
@@ -2726,8 +2726,9 @@ Regras CRÍTICAS:
       // 2) Setup muxer + encoders
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: "V_VP9", width: 1080, height: 1920 },
-        audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
+        video: { codec: "avc", width: 1080, height: 1920 },
+        audio: { codec: "opus", numberOfChannels: 1, sampleRate: 48000 },
+        fastStart: "in-memory"
       });
 
       const videoEncoder = new (window as any).VideoEncoder({
@@ -2735,11 +2736,12 @@ Regras CRÍTICAS:
         error: (e: any) => console.error("Video error:", e),
       });
       videoEncoder.configure({
-        codec: "vp09.00.10.08",
+        codec: "avc1.42001e",
         width: 1080,
         height: 1920,
         bitrate: 6_000_000,
         hardwareAcceleration: "prefer-hardware",
+        avc: { format: "avc" }
       });
 
       const audioEncoder = new (window as any).AudioEncoder({
@@ -3052,7 +3054,7 @@ Regras CRÍTICAS:
       await audioEncoder.flush();
       muxer.finalize();
 
-      const blob = new Blob([muxer.target.buffer], { type: "video/webm" });
+      const blob = new Blob([muxer.target.buffer], { type: "video/mp4" });
       if (blob.size === 0) {
         alert("O vídeo gerado está vazio. Tente novamente.");
         return;
@@ -3061,7 +3063,7 @@ Regras CRÍTICAS:
       const safeName = (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_");
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${safeName}.webm`;
+      a.download = `${safeName}.mp4`;
       document.body.appendChild(a);
       a.click();
       a.remove();
