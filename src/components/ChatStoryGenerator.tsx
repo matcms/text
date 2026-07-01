@@ -646,6 +646,7 @@ export default function ChatStoryGenerator() {
   const [exportFps, setExportFps] = useState<number>(30);
   const [bgVideoResolution, setBgVideoResolution] = useState<string>("");
   const [activeBgBlobUrl, setActiveBgBlobUrl] = useState<string>("");
+  const isBgVideo = activeBackground.startsWith("data:video/") || activeBackground.endsWith(".mp4") || activeBackground.includes("/bg_video.mp4");
 
   useEffect(() => {
     if (activeBackground.startsWith("data:video/")) {
@@ -2625,7 +2626,7 @@ Regras CRÍTICAS:
         setPlaybackElapsed(elapsed);
 
         // Keep DOM video background synced in preview
-        if (activeBackground.startsWith("data:video/") && activeBgVideoRef.current) {
+        if (isBgVideo && activeBgVideoRef.current) {
           const bgVideo = activeBgVideoRef.current;
           const currentSec = (elapsed / 1000) + bgVideoOffset;
           const dur = bgVideo.duration || 1;
@@ -5720,7 +5721,7 @@ Regras CRÍTICAS:
                 style={{
                   background: activeBackground.startsWith("data:image")
                     ? `url(${activeBackground}) center/cover no-repeat`
-                    : activeBackground.startsWith("data:video/")
+                    : isBgVideo
                     ? "transparent"
                     : activeBackground,
                 }}
@@ -5737,7 +5738,7 @@ Regras CRÍTICAS:
                   });
                 }}
               >
-                {activeBackground.startsWith("data:video/") && (
+                {isBgVideo && (
                   <video
                     ref={(el) => {
                       activeBgVideoRef.current = el;

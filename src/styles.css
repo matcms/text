@@ -274,5 +274,9 @@ body.is-render-local-mode section:not(#phone-preview-section) {
   display: none !important;
 }
 
+body.is-render-local-mode [data-preview-only="true"] {
+  display: none !important;
+}
+
 
 
