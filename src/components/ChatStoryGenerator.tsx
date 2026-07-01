@@ -469,6 +469,7 @@ export default function ChatStoryGenerator() {
   const [bgVideoDuration, setBgVideoDuration] = useState<number>(0);
   const activeBgVideoRef = useRef<HTMLVideoElement | null>(null);
   const [exportFps, setExportFps] = useState<number>(30);
+  const [bgVideoResolution, setBgVideoResolution] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -3422,7 +3423,7 @@ Regras CRÍTICAS:
                       <div className="flex items-center justify-between text-xs">
                         <Label className="text-zinc-300">Início do vídeo de fundo (offset)</Label>
                         <span className="text-zinc-400 font-mono">
-                          {bgVideoOffset}s {bgVideoDuration > 0 && `(Total: ${Math.round(bgVideoDuration)}s)`}
+                          {bgVideoOffset}s {bgVideoDuration > 0 && `(Total: ${Math.round(bgVideoDuration)}s${bgVideoResolution ? ` | ${bgVideoResolution}` : ""})`}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -5182,6 +5183,7 @@ Regras CRÍTICAS:
                       if (el) {
                         el.onloadedmetadata = () => {
                           setBgVideoDuration(el.duration);
+                          setBgVideoResolution(`${el.videoWidth}x${el.videoHeight}`);
                         };
                         if (el.currentTime !== bgVideoOffset && !playing) {
                           el.currentTime = bgVideoOffset % (el.duration || 1);
