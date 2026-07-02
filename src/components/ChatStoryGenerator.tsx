@@ -170,7 +170,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ChevronDown, RefreshCw, Sparkles, Wand2 } from "lucide-react";
+import { ChevronDown, RefreshCw, Sparkles, Wand2, Sliders } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import {
   saveProject,
@@ -557,6 +557,16 @@ export default function ChatStoryGenerator() {
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [phoneSize, setPhoneSize] = useState<number>(100); // Proportional mockup size percentage
   
+  // Custom HUD States
+  const [phoneYOffset, setPhoneYOffset] = useState<number>(0); // Vertical offset in pixels (-150 to 150)
+  const [maxBubbleWidth, setMaxBubbleWidth] = useState<number>(82); // Maximum percentage width of message bubble (50 to 90)
+  const [hudFontSize, setHudFontSize] = useState<number>(14); // Text font size in pixels (10 to 22)
+  const [hudAvatarSize, setHudAvatarSize] = useState<number>(24); // Avatar image size in pixels (18 to 42)
+  const [messageSpacing, setMessageSpacing] = useState<number>(3); // Margin-bottom spacing between blocks (1 to 15)
+  const [bubbleBorderRadius, setBubbleBorderRadius] = useState<number>(8); // Border radius of bubbles (2 to 24)
+  const [shadowStrength, setShadowStrength] = useState<number>(50); // Drop shadow blur strength (0 to 100)
+  const [glassOpacity, setGlassOpacity] = useState<number>(100); // Background glassmorphism opacity percentage (0 to 100)
+  
   // AI Speech Emotion Director States
   const [useDirector, setUseDirector] = useState(false);
   const [directorLlmProvider, setDirectorLlmProvider] = useState<"gemini" | "openai" | "local">("gemini");
@@ -689,7 +699,7 @@ export default function ChatStoryGenerator() {
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
-  const [activeSection, setActiveSection] = useState<"project" | "script" | "formatter" | "characters" | "media" | "generation" | "export" | "settings">("project");
+  const [activeSection, setActiveSection] = useState<"project" | "script" | "formatter" | "characters" | "media" | "generation" | "hud" | "export" | "settings">("project");
   const [generatingCharacter, setGeneratingCharacter] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<StoredProject[]>([]);
@@ -768,6 +778,16 @@ export default function ChatStoryGenerator() {
         setActiveBackground(data.activeBackground || "#9333ea");
         setBgVideoOffset(data.bgVideoOffset || 0);
         setPhoneSize(data.phoneSize || 100);
+        
+        setPhoneYOffset(data.phoneYOffset ?? 0);
+        setMaxBubbleWidth(data.maxBubbleWidth ?? 82);
+        setHudFontSize(data.hudFontSize ?? 14);
+        setHudAvatarSize(data.hudAvatarSize ?? 24);
+        setMessageSpacing(data.messageSpacing ?? 3);
+        setBubbleBorderRadius(data.bubbleBorderRadius ?? 8);
+        setShadowStrength(data.shadowStrength ?? 50);
+        setGlassOpacity(data.glassOpacity ?? 100);
+        
         setPlaying(true);
       };
 
@@ -1136,6 +1156,15 @@ export default function ChatStoryGenerator() {
     setBgVideoOffset(Number(localStorage.getItem("bg_video_offset")) || 0);
     setExportFps(Number(localStorage.getItem("export_fps")) || 30);
     setPhoneSize(Number(localStorage.getItem("phone_size")) || 100);
+    
+    setPhoneYOffset(Number(localStorage.getItem("hud_phone_y_offset")) || 0);
+    setMaxBubbleWidth(Number(localStorage.getItem("hud_max_bubble_width")) || 82);
+    setHudFontSize(Number(localStorage.getItem("hud_font_size")) || 14);
+    setHudAvatarSize(Number(localStorage.getItem("hud_avatar_size")) || 24);
+    setMessageSpacing(Number(localStorage.getItem("hud_message_spacing")) || 3);
+    setBubbleBorderRadius(Number(localStorage.getItem("hud_bubble_border_radius")) || 8);
+    setShadowStrength(Number(localStorage.getItem("hud_shadow_strength")) || 50);
+    setGlassOpacity(Number(localStorage.getItem("hud_glass_opacity")) || 100);
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -1157,6 +1186,30 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("phone_size", String(phoneSize));
   }, [phoneSize]);
+  useEffect(() => {
+    localStorage.setItem("hud_phone_y_offset", String(phoneYOffset));
+  }, [phoneYOffset]);
+  useEffect(() => {
+    localStorage.setItem("hud_max_bubble_width", String(maxBubbleWidth));
+  }, [maxBubbleWidth]);
+  useEffect(() => {
+    localStorage.setItem("hud_font_size", String(hudFontSize));
+  }, [hudFontSize]);
+  useEffect(() => {
+    localStorage.setItem("hud_avatar_size", String(hudAvatarSize));
+  }, [hudAvatarSize]);
+  useEffect(() => {
+    localStorage.setItem("hud_message_spacing", String(messageSpacing));
+  }, [messageSpacing]);
+  useEffect(() => {
+    localStorage.setItem("hud_bubble_border_radius", String(bubbleBorderRadius));
+  }, [bubbleBorderRadius]);
+  useEffect(() => {
+    localStorage.setItem("hud_shadow_strength", String(shadowStrength));
+  }, [shadowStrength]);
+  useEffect(() => {
+    localStorage.setItem("hud_glass_opacity", String(glassOpacity));
+  }, [glassOpacity]);
   useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
@@ -3737,6 +3790,14 @@ Regras CRÍTICAS:
         chatTheme: chatTheme,
         activeBackground: bgVideoFilename ? bgVideoFilename : activeBackground,
         phoneSize: phoneSize,
+        phoneYOffset: phoneYOffset,
+        maxBubbleWidth: maxBubbleWidth,
+        hudFontSize: hudFontSize,
+        hudAvatarSize: hudAvatarSize,
+        messageSpacing: messageSpacing,
+        bubbleBorderRadius: bubbleBorderRadius,
+        shadowStrength: shadowStrength,
+        glassOpacity: glassOpacity,
         bgVideoOffset: bgVideoOffset,
         chats: chats.map(c => ({
           ...c,
@@ -3835,6 +3896,7 @@ Regras CRÍTICAS:
             { id: "characters", label: "Personagens", icon: Users },
             { id: "media", label: "Mídias (Imagens/Vídeo)", icon: ImageIcon },
             { id: "generation", label: "Sintetizar Áudio", icon: Cpu },
+            { id: "hud", label: "Customizar HUD", icon: Sliders },
             { id: "export", label: "Exportar Vídeo", icon: Download },
             { id: "settings", label: "Avançado", icon: Settings },
           ].map((item) => {
@@ -5449,7 +5511,180 @@ Regras CRÍTICAS:
               </div>
             )}
 
-            {/* SEÇÃO: EXPORTAÇÃO */}
+            {/* SEÇÃO: CUSTOMIZAR HUD */}
+            {activeSection === "hud" && (
+              <div className="space-y-6 max-w-3xl">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">📱 Customizar HUD do Celular</h2>
+                  <p className="text-xs text-zinc-400">Ajuste o tamanho, fontes, transparências e posicionamento do celular na gravação final.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <h3 className="text-xs font-semibold text-zinc-200 border-b border-zinc-800/50 pb-2">Layout e Posição</h3>
+                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Tamanho Proporcional do Celular</Label>
+                        <span className="text-xs font-mono text-purple-400">{phoneSize}%</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={60}
+                        max={120}
+                        step={1}
+                        value={phoneSize}
+                        onChange={(e) => setPhoneSize(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Posição Vertical (Y-Offset)</Label>
+                        <span className="text-xs font-mono text-purple-400">{phoneYOffset}px</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={-150}
+                        max={150}
+                        step={5}
+                        value={phoneYOffset}
+                        onChange={(e) => setPhoneYOffset(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Largura Máxima dos Balões</Label>
+                        <span className="text-xs font-mono text-purple-400">{maxBubbleWidth}%</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={50}
+                        max={90}
+                        step={1}
+                        value={maxBubbleWidth}
+                        onChange={(e) => setMaxBubbleWidth(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
+                    <h3 className="text-xs font-semibold text-zinc-200 border-b border-zinc-800/50 pb-2">Fontes e Tamanhos</h3>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Tamanho da Letra do Chat</Label>
+                        <span className="text-xs font-mono text-purple-400">{hudFontSize}px</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={10}
+                        max={22}
+                        step={1}
+                        value={hudFontSize}
+                        onChange={(e) => setHudFontSize(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Tamanho da Foto de Perfil</Label>
+                        <span className="text-xs font-mono text-purple-400">{hudAvatarSize}px</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={18}
+                        max={42}
+                        step={1}
+                        value={hudAvatarSize}
+                        onChange={(e) => setHudAvatarSize(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-350">Distância entre Mensagens</Label>
+                        <span className="text-xs font-mono text-purple-400">{messageSpacing}px</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={1}
+                        max={15}
+                        step={1}
+                        value={messageSpacing}
+                        onChange={(e) => setMessageSpacing(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5 md:col-span-2">
+                    <h3 className="text-xs font-semibold text-zinc-200 border-b border-zinc-800/50 pb-2">Estilos e Efeitos de Transparência</h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-zinc-350">Arredondamento do Balão</Label>
+                          <span className="text-xs font-mono text-purple-400">{bubbleBorderRadius}px</span>
+                        </div>
+                        <Input
+                          type="range"
+                          min={2}
+                          max={24}
+                          step={1}
+                          value={bubbleBorderRadius}
+                          onChange={(e) => setBubbleBorderRadius(Number(e.target.value))}
+                          className="h-6 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-zinc-350">Força da Sombra (Celular)</Label>
+                          <span className="text-xs font-mono text-purple-400">{shadowStrength}%</span>
+                        </div>
+                        <Input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={shadowStrength}
+                          onChange={(e) => setShadowStrength(Number(e.target.value))}
+                          className="h-6 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-zinc-350">Efeito Vidro (Fundo do Celular)</Label>
+                          <span className="text-xs font-mono text-purple-400">{glassOpacity}%</span>
+                        </div>
+                        <Input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={glassOpacity}
+                          onChange={(e) => setGlassOpacity(Number(e.target.value))}
+                          className="h-6 cursor-pointer"
+                        />
+                        <p className="text-[8px] text-zinc-450 leading-tight">
+                          Valores abaixo de 100% revelam o vídeo de gameplay por trás do chat!
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO: EXPORTAR VÍDEO */}
             {activeSection === "export" && (
               <div className="space-y-6 max-w-3xl">
                 <div>
@@ -5603,25 +5838,6 @@ Regras CRÍTICAS:
                         onChange={(e) => setVoiceSpeed(Number(e.target.value))}
                         className="h-6 cursor-pointer"
                       />
-                    </div>
-
-                    <div className="space-y-2 md:col-span-2 border-t border-zinc-800/50 pt-4">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs text-zinc-300">Tamanho do Celular (HUD)</Label>
-                        <span className="text-xs font-mono text-purple-400">{phoneSize}%</span>
-                      </div>
-                      <Input
-                        type="range"
-                        min={60}
-                        max={120}
-                        step={1}
-                        value={phoneSize}
-                        onChange={(e) => setPhoneSize(Number(e.target.value))}
-                        className="h-6 cursor-pointer"
-                      />
-                      <p className="text-[9px] text-zinc-450">
-                        Ajusta a largura e a altura do celular na gravação final mantendo os textos legíveis.
-                      </p>
                     </div>
                   </div>
                 </div>
@@ -5900,11 +6116,17 @@ Regras CRÍTICAS:
                 )}
                 <div
                   id="phone-preview-phone"
-                  className="h-fit flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800 z-10"
+                  className="h-fit flex flex-col overflow-hidden shrink-0 border border-zinc-800 z-10"
                   style={{
-                    backgroundColor: isWA ? "#0b141a" : "#000000",
+                    backgroundColor: isWA
+                      ? `rgba(11, 20, 26, ${glassOpacity / 100})`
+                      : `rgba(0, 0, 0, ${glassOpacity / 100})`,
+                    backdropFilter: glassOpacity < 100 ? "blur(10px)" : "none",
                     width: `${92 * (phoneSize / 100)}%`,
-                    maxHeight: `${68 * (phoneSize / 100)}%`
+                    maxHeight: `${68 * (phoneSize / 100)}%`,
+                    transform: `translateY(${phoneYOffset}px)`,
+                    boxShadow: `0 20px ${shadowStrength}px rgba(0,0,0,${shadowStrength / 100})`,
+                    borderRadius: `${32 * (bubbleBorderRadius / 8)}px`
                   }}
                 >
                   {/* Header */}
@@ -6087,20 +6309,27 @@ Regras CRÍTICAS:
                             return false;
                           })();
 
-                          const spacingClass = isEndOfBlock ? "mb-3" : "mb-0.5";
-
                           const renderBubble = () => {
                             if (m.type === "text") {
                               if (isWA) {
                                 const bubbleSideClass = m.side === "2"
-                                  ? `bg-[#005c4b] ml-auto ${isLastInSequenceRight ? "rounded-lg rounded-tr-none wa-tail-right" : "rounded-lg"}`
-                                  : `bg-[#262d31] ${isLastInSequence ? "rounded-lg rounded-tl-none wa-tail-left" : "rounded-lg"}`;
+                                  ? `bg-[#005c4b] ml-auto ${isLastInSequenceRight ? "wa-tail-right" : ""}`
+                                  : `bg-[#262d31] ${isLastInSequence ? "wa-tail-left" : ""}`;
                                 return (
-                                  <div className={`relative max-w-[82%] py-1.5 px-2.5 text-white text-[14px] leading-snug shadow-sm ${bubbleSideClass}`}>
+                                  <div
+                                    className={`relative py-1.5 px-2.5 text-white leading-snug shadow-sm ${bubbleSideClass}`}
+                                    style={{
+                                      maxWidth: `${maxBubbleWidth}%`,
+                                      fontSize: `${hudFontSize}px`,
+                                      borderRadius: `${bubbleBorderRadius}px`,
+                                      borderTopLeftRadius: isLeftSide && isLastInSequence ? "0" : undefined,
+                                      borderTopRightRadius: !isLeftSide && isLastInSequenceRight ? "0" : undefined
+                                    }}
+                                  >
                                     {showName && (
                                       <span
-                                        className="text-[12px] font-bold mb-0.5 capitalize block"
-                                        style={{ color: nameColor || "#53bdeb" }}
+                                        className="font-bold mb-0.5 capitalize block"
+                                        style={{ color: nameColor || "#53bdeb", fontSize: `${hudFontSize - 2}px` }}
                                       >
                                         {senderName}
                                       </span>
@@ -6110,10 +6339,17 @@ Regras CRÍTICAS:
                                 );
                               } else {
                                 const bubbleSideClass = m.side === "2"
-                                  ? `bg-[#0A84FF] rounded-2xl ${isLastInSequenceRight ? "im-tail-right" : ""}`
-                                  : `bg-[#262628] rounded-2xl ${isLastInSequence ? "im-tail-left" : ""}`;
+                                  ? `bg-[#0A84FF] ${isLastInSequenceRight ? "im-tail-right" : ""}`
+                                  : `bg-[#262628] ${isLastInSequence ? "im-tail-left" : ""}`;
                                 return (
-                                  <div className={`relative max-w-[82%] px-3 py-1.5 text-white text-[14px] leading-snug ${bubbleSideClass}`}>
+                                  <div
+                                    className={`relative px-3 py-1.5 text-white leading-snug ${bubbleSideClass}`}
+                                    style={{
+                                      maxWidth: `${maxBubbleWidth}%`,
+                                      fontSize: `${hudFontSize}px`,
+                                      borderRadius: `${bubbleBorderRadius * 2}px`
+                                    }}
+                                  >
                                     {renderCensored(m.text)}
                                   </div>
                                 );
@@ -6122,11 +6358,14 @@ Regras CRÍTICAS:
                               if (m.imageUrl) {
                                 if (isWA) {
                                   return (
-                                    <div className={`p-1 rounded-lg ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}>
+                                    <div
+                                      className={`p-1 ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}
+                                      style={{ borderRadius: `${bubbleBorderRadius}px` }}
+                                    >
                                       {showName && (
                                         <span
-                                          className="text-[12px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
-                                          style={{ color: nameColor || "#53bdeb" }}
+                                          className="font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                          style={{ color: nameColor || "#53bdeb", fontSize: `${hudFontSize - 2}px` }}
                                         >
                                           {senderName}
                                         </span>
@@ -6136,12 +6375,20 @@ Regras CRÍTICAS:
                                   );
                                 } else {
                                   return (
-                                    <img src={m.imageUrl} alt={m.text} className="max-w-[70%] max-h-48 object-cover rounded-2xl" />
+                                    <img
+                                      src={m.imageUrl}
+                                      alt={m.text}
+                                      className="max-w-[70%] max-h-48 object-cover"
+                                      style={{ borderRadius: `${bubbleBorderRadius * 2}px` }}
+                                    />
                                   );
                                 }
                               } else {
                                 return (
-                                  <div className={`h-24 w-40 rounded-2xl flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}>
+                                  <div
+                                    className={`h-24 w-40 flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}
+                                    style={{ borderRadius: `${bubbleBorderRadius * 2}px` }}
+                                  >
                                     <ImageIcon className="h-6 w-6" />
                                     <span className="text-center line-clamp-2">{m.text}</span>
                                   </div>
@@ -6152,11 +6399,14 @@ Regras CRÍTICAS:
                                 const isGif = m.videoType === "gif";
                                 if (isWA) {
                                   return (
-                                    <div className={`p-1 rounded-lg ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}>
+                                    <div
+                                      className={`p-1 ${m.side === "2" ? "bg-[#005c4b] ml-auto" : "bg-[#262d31]"}`}
+                                      style={{ borderRadius: `${bubbleBorderRadius}px` }}
+                                    >
                                       {showName && (
                                         <span
-                                          className="text-[12px] font-bold px-1.5 pt-0.5 pb-1 capitalize block"
-                                          style={{ color: nameColor || "#53bdeb" }}
+                                          className="font-bold px-1.5 pt-0.5 pb-1 capitalize block"
+                                          style={{ color: nameColor || "#53bdeb", fontSize: `${hudFontSize - 2}px` }}
                                         >
                                           {senderName}
                                         </span>
@@ -6176,20 +6426,30 @@ Regras CRÍTICAS:
                                   );
                                 } else {
                                   return isGif ? (
-                                    <img src={m.videoUrl} alt={m.text} className="max-w-[210px] max-h-[160px] object-cover rounded-2xl" />
-                                  ) : (
-                                    <VideoBubble
+                                    <img
                                       src={m.videoUrl}
-                                      recording={recording}
-                                      className="max-w-[210px] max-h-[160px] object-cover rounded-2xl"
-                                      msgId={m.id}
-                                      chatId={displayChat.id}
+                                      alt={m.text}
+                                      className="max-w-[210px] max-h-[160px] object-cover"
+                                      style={{ borderRadius: `${bubbleBorderRadius * 2}px` }}
                                     />
-                                  );
-                                }
+                                  ) : (
+                                     <div style={{ borderRadius: `${bubbleBorderRadius * 2}px`, overflow: "hidden" }}>
+                                       <VideoBubble
+                                         src={m.videoUrl}
+                                         recording={recording}
+                                         className="max-w-[210px] max-h-[160px] object-cover"
+                                         msgId={m.id}
+                                         chatId={displayChat.id}
+                                       />
+                                     </div>
+                                   );
+                                 }
                               } else {
                                 return (
-                                  <div className={`w-[210px] h-[140px] rounded-2xl flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}>
+                                  <div
+                                    className={`w-[210px] h-[140px] flex flex-col items-center justify-center text-[10px] gap-1.5 p-2 ${isWA ? "bg-[#262d31] text-[#8696a0]" : "bg-zinc-800 text-zinc-350"}`}
+                                    style={{ borderRadius: `${bubbleBorderRadius * 2}px` }}
+                                  >
                                     <Video className="h-6 w-6" />
                                     <span className="text-center truncate max-w-full px-2">{m.text}</span>
                                   </div>
@@ -6204,16 +6464,19 @@ Regras CRÍTICAS:
                               initial={{ opacity: recording ? 1 : 0, y: recording ? 0 : 15 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ duration: recording ? 0 : 0.25 }}
-                              className={`flex flex-col ${spacingClass} ${
+                              className={`flex flex-col ${
                                 m.side === "2" ? "items-end" : "items-start"
                               } ${!effectiveGroupChat && m.side === "1" ? "pl-1.5" : ""}`}
+                              style={{
+                                marginBottom: isEndOfBlock ? `${messageSpacing * 4}px` : `${messageSpacing}px`
+                              }}
                             >
                               {!isWA && showName && (
                                 <span
                                   className="text-[10px] mb-0.5 capitalize block"
                                   style={{
                                     color: nameColor || "#8e8e93",
-                                    marginLeft: showAvatarPlaceholder ? "32px" : "10px",
+                                    marginLeft: showAvatarPlaceholder ? `${hudAvatarSize + 8}px` : "10px",
                                   }}
                                 >
                                   {senderName}
@@ -6221,16 +6484,27 @@ Regras CRÍTICAS:
                               )}
                               {showAvatarPlaceholder ? (
                                 <div className="flex flex-row items-end gap-1.5 w-full">
-                                  <div className="w-6.5 h-6.5 flex-shrink-0 flex items-center justify-center select-none relative z-10">
+                                  <div
+                                    className="flex-shrink-0 flex items-center justify-center select-none relative z-10"
+                                    style={{ width: `${hudAvatarSize + 2}px`, height: `${hudAvatarSize + 2}px` }}
+                                  >
                                     {showAvatar && (
                                       avatarUrl ? (
                                         <img
                                           src={avatarUrl}
                                           alt={senderName}
-                                          className="w-6 h-6 rounded-full object-cover border border-zinc-800"
+                                          className="rounded-full object-cover border border-zinc-800"
+                                          style={{ width: `${hudAvatarSize}px`, height: `${hudAvatarSize}px` }}
                                         />
                                       ) : (
-                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-zinc-600 to-zinc-850 flex items-center justify-center text-white text-[9px] font-semibold uppercase border border-zinc-800">
+                                        <div
+                                          className="rounded-full bg-gradient-to-br from-zinc-600 to-zinc-850 flex items-center justify-center text-white font-semibold uppercase border border-zinc-800"
+                                          style={{
+                                            width: `${hudAvatarSize}px`,
+                                            height: `${hudAvatarSize}px`,
+                                            fontSize: `${hudAvatarSize * 0.38}px`
+                                          }}
+                                        >
                                           {charInitial}
                                         </div>
                                       )
