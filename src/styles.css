@@ -238,48 +238,34 @@ body.is-render-local-mode #phone-preview-section {
   padding: 0 !important;
   background: black !important;
   border: none !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  overflow: hidden !important;
 }
 
+/* Render the phone preview layout at its native 370px width design scale, 
+   then upscale by 2.9189x to fill the 1080px wide output viewport. */
 body.is-render-local-mode #phone-preview-section > div {
-  width: 1080px !important;
-  height: 1920px !important;
+  width: 370px !important;
+  height: 658px !important;
   max-width: none !important;
   max-height: none !important;
-  aspect-ratio: 9/16 !important;
   margin: 0 !important;
   padding: 0 !important;
+  transform: scale(2.9189189) !important; /* 1080 / 370 */
+  transform-origin: top left !important;
 }
 
 body.is-render-local-mode #phone-preview-wrapper {
-  width: 1080px !important;
-  height: 1920px !important;
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   margin: 0 !important;
   padding: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
 }
 
+/* Remove manual overrides on the phone container and scrollport, 
+   allowing them to render naturally at the original design scale. */
 body.is-render-local-mode #phone-preview-phone {
-  width: 92% !important;
-  max-width: 994px !important;
-  height: 68% !important;
-  max-height: 1306px !important;
-  border-radius: 3rem !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.8) !important;
-  margin: 0 !important;
-}
-
-/* Force the scrollport to occupy remaining height and enable proper scroll clipping */
-body.is-render-local-mode #phone-preview-phone > div:nth-child(2) {
-  flex: 1 1 0% !important;
-  height: 100% !important;
-  overflow: hidden !important;
+  margin: 0 auto !important;
 }
 
 /* Hide everything else on the page during local rendering */
