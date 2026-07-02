@@ -424,9 +424,32 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
       const filePath = path.join(cwd, "public", relativePath);
 
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const stat = fs.statSync(filePath);
         const ext = path.extname(filePath).toLowerCase();
-        res.writeHead(200, { "Content-Type": mime[ext] || "application/octet-stream" });
-        fs.createReadStream(filePath).pipe(res);
+        const contentType = mime[ext] || "application/octet-stream";
+        
+        const range = req.headers.range;
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+          const chunksize = (end - start) + 1;
+          
+          res.writeHead(206, {
+            "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+            "Accept-Ranges": "bytes",
+            "Content-Length": chunksize,
+            "Content-Type": contentType,
+          });
+          
+          fs.createReadStream(filePath, { start, end }).pipe(res);
+        } else {
+          res.writeHead(200, {
+            "Content-Length": stat.size,
+            "Content-Type": contentType,
+          });
+          fs.createReadStream(filePath).pipe(res);
+        }
       } else {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("Not Found");
@@ -743,6 +766,7 @@ export default function ChatStoryGenerator() {
         }
         setActiveBackground(data.activeBackground || "#9333ea");
         setBgVideoOffset(data.bgVideoOffset || 0);
+        setPlaying(true);
       };
 
       (window as any).renderFrameLocal = async (timeSec: number) => {

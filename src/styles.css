@@ -275,6 +275,13 @@ body.is-render-local-mode #phone-preview-phone {
   margin: 0 !important;
 }
 
+/* Force the scrollport to occupy remaining height and enable proper scroll clipping */
+body.is-render-local-mode #phone-preview-phone > div:nth-child(2) {
+  flex: 1 1 0% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
 /* Hide everything else on the page during local rendering */
 body.is-render-local-mode main,
 body.is-render-local-mode aside,
