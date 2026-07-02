@@ -555,6 +555,7 @@ export default function ChatStoryGenerator() {
   const [omniVoiceUrl, setOmniVoiceUrl] = useState("http://localhost:8000");
   const [chatTheme, setChatTheme] = useState<ChatTheme>("imessage");
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  const [phoneSize, setPhoneSize] = useState<number>(100); // Proportional mockup size percentage
   
   // AI Speech Emotion Director States
   const [useDirector, setUseDirector] = useState(false);
@@ -766,6 +767,7 @@ export default function ChatStoryGenerator() {
         }
         setActiveBackground(data.activeBackground || "#9333ea");
         setBgVideoOffset(data.bgVideoOffset || 0);
+        setPhoneSize(data.phoneSize || 100);
         setPlaying(true);
       };
 
@@ -1133,6 +1135,7 @@ export default function ChatStoryGenerator() {
     setOmniGuidanceScale(Number(localStorage.getItem("omni_guidance_scale")) || 2.0);
     setBgVideoOffset(Number(localStorage.getItem("bg_video_offset")) || 0);
     setExportFps(Number(localStorage.getItem("export_fps")) || 30);
+    setPhoneSize(Number(localStorage.getItem("phone_size")) || 100);
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -1151,6 +1154,9 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("export_fps", String(exportFps));
   }, [exportFps]);
+  useEffect(() => {
+    localStorage.setItem("phone_size", String(phoneSize));
+  }, [phoneSize]);
   useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
@@ -3730,6 +3736,7 @@ Regras CRÍTICAS:
         projectName: projectName,
         chatTheme: chatTheme,
         activeBackground: bgVideoFilename ? bgVideoFilename : activeBackground,
+        phoneSize: phoneSize,
         bgVideoOffset: bgVideoOffset,
         chats: chats.map(c => ({
           ...c,
@@ -5597,6 +5604,25 @@ Regras CRÍTICAS:
                         className="h-6 cursor-pointer"
                       />
                     </div>
+
+                    <div className="space-y-2 md:col-span-2 border-t border-zinc-800/50 pt-4">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-zinc-300">Tamanho do Celular (HUD)</Label>
+                        <span className="text-xs font-mono text-purple-400">{phoneSize}%</span>
+                      </div>
+                      <Input
+                        type="range"
+                        min={60}
+                        max={120}
+                        step={1}
+                        value={phoneSize}
+                        onChange={(e) => setPhoneSize(Number(e.target.value))}
+                        className="h-6 cursor-pointer"
+                      />
+                      <p className="text-[9px] text-zinc-450">
+                        Ajusta a largura e a altura do celular na gravação final mantendo os textos legíveis.
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -5874,8 +5900,12 @@ Regras CRÍTICAS:
                 )}
                 <div
                   id="phone-preview-phone"
-                  className="w-[92%] h-fit max-h-[68%] flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800 z-10"
-                  style={{ backgroundColor: isWA ? "#0b141a" : "#000000" }}
+                  className="h-fit flex flex-col rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden shrink-0 border border-zinc-800 z-10"
+                  style={{
+                    backgroundColor: isWA ? "#0b141a" : "#000000",
+                    width: `${92 * (phoneSize / 100)}%`,
+                    maxHeight: `${68 * (phoneSize / 100)}%`
+                  }}
                 >
                   {/* Header */}
                   <div className="shrink-0 z-10 w-full">

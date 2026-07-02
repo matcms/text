@@ -239,14 +239,14 @@ body.is-render-local-mode #phone-preview-section {
   background: black !important;
   border: none !important;
   overflow: hidden !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 /* Render the phone preview layout at its native 370px width design scale, 
    then upscale by 2.9189x to fill the 1080px wide output viewport. */
 body.is-render-local-mode #phone-preview-section > div {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
   width: 370px !important;
   height: 658px !important;
   max-width: none !important;
@@ -254,7 +254,7 @@ body.is-render-local-mode #phone-preview-section > div {
   margin: 0 !important;
   padding: 0 !important;
   transform: scale(2.9189189) !important; /* 1080 / 370 */
-  transform-origin: top left !important;
+  transform-origin: center center !important;
 }
 
 body.is-render-local-mode #phone-preview-wrapper {
