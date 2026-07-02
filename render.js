@@ -190,7 +190,11 @@ async function run() {
       console.warn("Nao foi possivel apagar arquivos temporarios:", e);
     }
 
-    console.log("\nProcessamento concluído. Esta janela permanecerá aberta para que você possa copiar os logs.");
+    // Auto shutdown: exit command prompt after 3 seconds
+    console.log("\nFechando janela em 3 segundos...");
+    setTimeout(() => {
+      process.exit(0);
+    }, 3000);
   }
 }
 

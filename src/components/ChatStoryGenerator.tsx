@@ -507,7 +507,7 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
     const tempJsonPath = path.join(cwd, `temp_project_${timestamp}.json`);
     fs.writeFileSync(tempJsonPath, JSON.stringify(project, null, 2), "utf8");
     
-    const command = `start cmd.exe /k "cd /d ${cwd} && node render.js ${tempJsonPath}"`;
+    const command = `start cmd.exe /c "cd /d ${cwd} && node render.js ${tempJsonPath}"`;
     
     return new Promise<{ success: boolean; error?: string }>((resolve) => {
       exec(command, (error) => {
