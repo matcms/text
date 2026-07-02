@@ -350,6 +350,7 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
     const { exec } = await import("child_process");
     const fs = await import("fs");
     const path = await import("path");
+    const http = await import("http");
     
     // data is a FormData instance on the server side
     const projectRaw = data.get("project") as string;
@@ -376,7 +377,7 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
       fs.writeFileSync(path.join(tempDirPath, "bg_video.mp4"), bgVideoBuffer);
     }
     
-    // 3) Save all message video files
+    // 3) Save all message video and image files
     for (const key of data.keys()) {
       if (key.startsWith("msgVideo_")) {
         const file = data.get(key) as any;
@@ -385,12 +386,57 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
           const idxStr = key.replace("msgVideo_", "");
           fs.writeFileSync(path.join(tempDirPath, `msg_video_${idxStr}.mp4`), fileBuffer);
         }
+      } else if (key.startsWith("msgImage_")) {
+        const file = data.get(key) as any;
+        if (file) {
+          const fileBuffer = Buffer.from(await file.arrayBuffer());
+          const idxStr = key.replace("msgImage_", "");
+          const ext = file.name ? path.extname(file.name) : ".png";
+          fs.writeFileSync(path.join(tempDirPath, `msg_image_${idxStr}${ext}`), fileBuffer);
+        }
       }
     }
     
-    // 4) Parse project JSON and update all paths to live server asset URLs
+    // 4) Spin up a dynamic local HTTP server on port 8085 to bypass Vinxi static asset caching
+    const mime: Record<string, string> = {
+      ".mp4": "video/mp4",
+      ".wav": "audio/wav",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif"
+    };
+
+    const fileServer = http.createServer((req: any, res: any) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const urlPath = req.url.split("?")[0];
+      const relativePath = urlPath.replace(/^\//, "");
+      const filePath = path.join(cwd, "public", relativePath);
+
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        res.writeHead(200, { "Content-Type": mime[ext] || "application/octet-stream" });
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+      }
+    });
+
+    fileServer.listen(8085);
+    
+    // 5) Parse project JSON and update all paths to live server asset URLs
     const project = JSON.parse(projectRaw);
-    const host = project.origin || "http://localhost:8080";
+    const host = "http://localhost:8085"; // Use the dynamically started file server
     
     // Update audio track path (used by render.js directly)
     project.audioPath = path.join(tempDirPath, "audio.wav");
@@ -400,20 +446,26 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
       project.activeBackground = `${host}/${tempDirName}/bg_video.mp4`;
     }
     
-    // Update message video URLs in project
+    // Update message video and image URLs in project
     if (project.messages && Array.isArray(project.messages)) {
-      project.messages = project.messages.map((m: any, idx: number) => {
+      project.messages = project.messages.map((m: any) => {
         if (m.type === "video" && m.videoUrl && m.videoUrl.endsWith(".mp4")) {
           return {
             ...m,
             videoUrl: `${host}/${tempDirName}/${m.videoUrl}`
           };
         }
+        if (m.type === "image" && m.imageUrl && (m.imageUrl.includes("msg_image_") || m.imageUrl.endsWith(".png") || m.imageUrl.endsWith(".jpg") || m.imageUrl.endsWith(".jpeg") || m.imageUrl.endsWith(".gif"))) {
+          return {
+            ...m,
+            imageUrl: `${host}/${tempDirName}/${m.imageUrl}`
+          };
+        }
         return m;
       });
     }
     
-    // Update chats message video URLs too
+    // Update chats message video and image URLs too
     if (project.chats && Array.isArray(project.chats)) {
       project.chats = project.chats.map((c: any) => {
         if (c.messages && Array.isArray(c.messages)) {
@@ -435,6 +487,7 @@ const startLocalRenderServerFn = createServerFn({ method: "POST" })
     
     return new Promise<{ success: boolean; error?: string }>((resolve) => {
       exec(command, (error) => {
+        fileServer.close(); // Clean up dynamic file server on completion
         if (error) {
           console.error("Erro ao iniciar o renderizador local:", error);
           resolve({ success: false, error: error.message });
@@ -3597,23 +3650,48 @@ Regras CRÍTICAS:
       formData.append("audio", audioBlob, "audio.wav");
 
       let bgVideoFilename = "";
-      if (activeBackground.startsWith("data:video/")) {
-        const blob = dataURLtoBlob(activeBackground);
-        formData.append("bgVideo", blob, "bg_video.mp4");
-        bgVideoFilename = "bg_video.mp4";
+      if (activeBackground.startsWith("data:video/") || activeBackground.startsWith("blob:")) {
+        try {
+          const response = await fetch(activeBackground);
+          const blob = await response.blob();
+          formData.append("bgVideo", blob, "bg_video.mp4");
+          bgVideoFilename = "bg_video.mp4";
+        } catch (e) {
+          console.error("Failed to fetch bgVideo blob", e);
+        }
       }
 
       setLocalExportProgress(65);
 
       const cleanMessages = await Promise.all(messages.map(async (msg, idx) => {
-        if (msg.type === "video" && msg.videoUrl && msg.videoUrl.startsWith("data:video/")) {
-          const blob = dataURLtoBlob(msg.videoUrl);
-          const filename = `msg_video_${idx}.mp4`;
-          formData.append(`msgVideo_${idx}`, blob, filename);
-          return {
-            ...msg,
-            videoUrl: filename
-          };
+        if (msg.type === "video" && msg.videoUrl) {
+          try {
+            const response = await fetch(msg.videoUrl);
+            const blob = await response.blob();
+            const filename = `msg_video_${idx}.mp4`;
+            formData.append(`msgVideo_${idx}`, blob, filename);
+            return {
+              ...msg,
+              videoUrl: filename
+            };
+          } catch (e) {
+            console.error("Failed to fetch msgVideo blob", e);
+          }
+        }
+        if (msg.type === "image" && msg.imageUrl) {
+          try {
+            const response = await fetch(msg.imageUrl);
+            const blob = await response.blob();
+            const ext = blob.type.split("/")[1] || "png";
+            const filename = `msg_image_${idx}.${ext}`;
+            formData.append(`msgImage_${idx}`, blob, filename);
+            return {
+              ...msg,
+              imageUrl: filename
+            };
+          } catch (e) {
+            console.error("Failed to fetch msgImage blob", e);
+          }
         }
         return msg;
       }));
@@ -3632,11 +3710,20 @@ Regras CRÍTICAS:
           ...c,
           messages: c.messages.map(m => {
             const msgIdx = messages.findIndex(orig => orig.id === m.id);
-            if (m.type === "video" && msgIdx >= 0) {
-              return {
-                ...m,
-                videoUrl: `msg_video_${msgIdx}.mp4`
-              };
+            if (msgIdx >= 0) {
+              const cleanMsg = cleanMessages[msgIdx] as any;
+              if (m.type === "video" && cleanMsg.videoUrl) {
+                return {
+                  ...m,
+                  videoUrl: cleanMsg.videoUrl
+                };
+              }
+              if (m.type === "image" && cleanMsg.imageUrl) {
+                return {
+                  ...m,
+                  imageUrl: cleanMsg.imageUrl
+                };
+              }
             }
             return m;
           })
