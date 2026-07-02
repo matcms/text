@@ -236,32 +236,43 @@ body.is-render-local-mode #phone-preview-section {
   z-index: 99999 !important;
   margin: 0 !important;
   padding: 0 !important;
-  background: transparent !important;
+  background: black !important;
   border: none !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
 }
 
-body.is-render-local-mode #phone-preview-wrapper {
+body.is-render-local-mode #phone-preview-section > div {
   width: 1080px !important;
   height: 1920px !important;
   max-width: none !important;
-  transform: none !important;
+  max-height: none !important;
+  aspect-ratio: 9/16 !important;
   margin: 0 !important;
   padding: 0 !important;
 }
 
-body.is-render-local-mode #phone-preview-phone {
+body.is-render-local-mode #phone-preview-wrapper {
   width: 1080px !important;
   height: 1920px !important;
-  max-height: none !important;
   max-width: none !important;
-  border-radius: 0 !important;
-  border: none !important;
-  box-shadow: none !important;
   margin: 0 !important;
   padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+body.is-render-local-mode #phone-preview-phone {
+  width: 92% !important;
+  max-width: 994px !important;
+  height: 80% !important;
+  max-height: 1536px !important;
+  border-radius: 3rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.8) !important;
+  margin: 0 !important;
 }
 
 /* Hide everything else on the page during local rendering */
