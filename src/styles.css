@@ -267,8 +267,8 @@ body.is-render-local-mode #phone-preview-wrapper {
 body.is-render-local-mode #phone-preview-phone {
   width: 92% !important;
   max-width: 994px !important;
-  height: 80% !important;
-  max-height: 1536px !important;
+  height: 68% !important;
+  max-height: 1306px !important;
   border-radius: 3rem !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.8) !important;
