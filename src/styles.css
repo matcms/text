@@ -244,6 +244,9 @@ body.is-render-local-mode #phone-preview-section {
 /* Render the phone preview layout at its native 370px width design scale, 
    then upscale by 2.9189x to fill the 1080px wide output viewport. */
 body.is-render-local-mode #phone-preview-section > div {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
   width: 370px !important;
   height: 658px !important;
   max-width: none !important;
