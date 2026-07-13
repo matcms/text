@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { EditorProvider } from "@/hooks/useEditorState";
 import {
   Outlet,
   Link,
@@ -118,7 +119,9 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <EditorProvider>
+        <Outlet />
+      </EditorProvider>
       <Toaster richColors />
     </QueryClientProvider>
   );

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+soundfile
+numpy
+transformers
+omnivoice==0.1.5
+qwen-tts==0.1.1
+python-multipart
+torch
+torchaudio

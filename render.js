@@ -27,12 +27,15 @@ try {
   process.exit(1);
 }
 
-const { origin, fps, duration, audioBase64, outputName } = project;
+const { origin, fps, duration, audioBase64, outputName, trimStart = 0, trimEnd } = project;
+const finalTrimStart = Number(trimStart) || 0;
+const finalTrimEnd = Number(trimEnd) || duration;
+const finalDuration = Math.max(0.1, finalTrimEnd - finalTrimStart);
 
 console.log("=========================================");
 console.log("   TEXTSTORY - RENDERIZADOR LOCAL PC    ");
 console.log("=========================================");
-console.log(`Duração do Vídeo: ${duration.toFixed(2)}s`);
+console.log(`Duração do Vídeo: ${finalDuration.toFixed(2)}s (Trim: ${finalTrimStart.toFixed(1)}s - ${finalTrimEnd.toFixed(1)}s)`);
 console.log(`Taxa de Quadros (FPS): ${fps}`);
 console.log(`Nome do Arquivo: ${outputName}.mp4`);
 console.log(`Origin do App: ${origin}`);
@@ -68,9 +71,7 @@ async function run() {
     // Pipe browser page logs and errors to console
     page.on('console', msg => {
       const text = msg.text();
-      if (msg.type() === 'error' || text.includes('failed') || text.includes('Error')) {
-        console.log(`[Browser Console] ${msg.type().toUpperCase()}: ${text}`);
-      }
+      console.log(`[Browser Console] ${msg.type().toUpperCase()}: ${text}`);
     });
     page.on('pageerror', err => {
       console.error(`[Browser PageError] ${err.toString()}`);
@@ -131,10 +132,10 @@ async function run() {
     });
 
     console.log("\nIniciando captura de quadros...");
-    const totalFrames = Math.max(1, Math.round(duration * fps));
+    const totalFrames = Math.max(1, Math.round(finalDuration * fps));
     
     for (let f = 0; f < totalFrames; f++) {
-      const timeSec = f / fps;
+      const timeSec = (f / fps) + finalTrimStart;
       
       // Update frame layout and seek videos in Puppeteer page
       await page.evaluate(async (t) => {

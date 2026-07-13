@@ -170,7 +170,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ChevronDown, RefreshCw, Sparkles, Wand2, Sliders } from "lucide-react";
+import { ChevronDown, RefreshCw, Sparkles, Wand2, Sliders, SlidersHorizontal } from "lucide-react";
+import { useEditor } from "@/hooks/useEditorState";
+import { Timeline } from "./Timeline";
+import { MessageEditPanel } from "./MessageEditPanel";
+import { GlobalControls } from "./GlobalControls";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import {
   saveProject,
@@ -541,6 +545,22 @@ const startOmniVoiceServerFn = createServerFn({ method: "POST" })
   });
 
 export default function ChatStoryGenerator() {
+  const {
+    edits,
+    globalEdits,
+    processedAudios,
+    processingStatus,
+    selectedMsgKey,
+    setSelectedMsgKey,
+    updateMessageEdit,
+    updateGlobalEdits,
+    triggerAudioProcessing,
+    resetEdits,
+    getEffectiveDuration,
+    loadProjectEdits,
+    cacheAudioDuration,
+  } = useEditor();
+
   const [elevenKey, setElevenKey] = useState("");
   const [elevenModel, setElevenModel] = useState("eleven_multilingual_v2");
   const [elevenModels, setElevenModels] = useState<{ model_id: string; name: string }[]>([
@@ -566,6 +586,7 @@ export default function ChatStoryGenerator() {
   const [bubbleBorderRadius, setBubbleBorderRadius] = useState<number>(8); // Border radius of bubbles (2 to 24)
   const [shadowStrength, setShadowStrength] = useState<number>(50); // Drop shadow blur strength (0 to 100)
   const [glassOpacity, setGlassOpacity] = useState<number>(100); // Background glassmorphism opacity percentage (0 to 100)
+  const [scrollMode, setScrollMode] = useState<"continuous" | "page">("continuous"); // Chat scrolling behavior
   
   // AI Speech Emotion Director States
   const [useDirector, setUseDirector] = useState(false);
@@ -627,6 +648,13 @@ export default function ChatStoryGenerator() {
   
   const [messageDelay, setMessageDelay] = useState(0);
   const [isGroupChat, setIsGroupChat] = useState(false);
+
+  // Synchronize messageDelay with globalEdits.delay so that the timeline and video export respect it
+  useEffect(() => {
+    if (globalEdits.delay !== messageDelay) {
+      updateGlobalEdits({ delay: messageDelay });
+    }
+  }, [messageDelay, globalEdits.delay, updateGlobalEdits]);
 
   // Voice library (persisted)
   type SavedVoice = { name: string; voiceId: string; referenceAudioB64?: string };
@@ -699,7 +727,7 @@ export default function ChatStoryGenerator() {
   // Projects (IndexedDB)
   const [projectName, setProjectName] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "projects">("editor");
-  const [activeSection, setActiveSection] = useState<"project" | "script" | "formatter" | "characters" | "media" | "generation" | "hud" | "export" | "settings">("project");
+  const [activeSection, setActiveSection] = useState<"project" | "script" | "formatter" | "characters" | "media" | "generation" | "hud" | "edit" | "export" | "settings">("project");
   const [generatingCharacter, setGeneratingCharacter] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<StoredProject[]>([]);
@@ -728,7 +756,9 @@ export default function ChatStoryGenerator() {
   const [newColor, setNewColor] = useState<string>("#ff0066");
   const bgFileInputRef = useRef<HTMLInputElement | null>(null);
   const bgVideoInputRef = useRef<HTMLInputElement | null>(null);
-  const [bgVideoOffset, setBgVideoOffset] = useState<number>(0); // Video background start offset in seconds
+  const [bgVideoOffset, setBgVideoOffset] = useState<number>(0);
+
+ // Video background start offset in seconds
   const [bgVideoDuration, setBgVideoDuration] = useState<number>(0);
   const activeBgVideoRef = useRef<HTMLVideoElement | null>(null);
   const [exportFps, setExportFps] = useState<number>(30);
@@ -766,8 +796,9 @@ export default function ChatStoryGenerator() {
       
       console.log("Render mode active. Exposing global methods...");
       
-      (window as any).initRenderLocal = (data: any) => {
+      (window as any).initRenderLocal = async (data: any) => {
         console.log("initRenderLocal called", data);
+        loadProjectEdits(data);
         setProjectName(data.projectName || "chat-story");
         setChatTheme(data.chatTheme || "imessage");
         const newChats = data.chats || [];
@@ -787,6 +818,109 @@ export default function ChatStoryGenerator() {
         setBubbleBorderRadius(data.bubbleBorderRadius ?? 8);
         setShadowStrength(data.shadowStrength ?? 50);
         setGlassOpacity(data.glassOpacity ?? 100);
+        setScrollMode(data.scrollMode || "continuous");
+        
+        // Wait 500ms for everything to style and layout properly
+        await new Promise((r) => setTimeout(r, 500));
+        
+        // Pre-compute pagination splits if scrollMode is page
+        if (data.scrollMode === "page") {
+          setPlaying(true); // Must be true so that `visibleMessages` is used in render!
+          await new Promise((r) => setTimeout(r, 100)); // Wait for React to apply `playing=true`
+          console.log("Starting pagination computation...");
+          const msgList = data.messages || [];
+          const pages: number[] = [0];
+          const queue: Msg[] = [];
+          
+          const pSize = data.phoneSize || 100;
+          
+          // STEP 1: Temporarily force the phone to FULL fixed height so that
+          // chatOuterRef gets a real clientHeight and overflow detection works.
+          // Without this, h-fit + flex-shrink makes chatOuter shrink to content,
+          // causing scrollHeight to always equal clientHeight (no overflow detected)
+          // or measurements to be unreliable in Puppeteer headless.
+          const phoneEl = document.querySelector("#phone-preview-phone") as HTMLElement | null;
+          const chatOuterEl = chatOuterRef.current;
+          
+          // Save original styles
+          const origPhoneHeight = phoneEl?.style.height || "";
+          const origPhoneMaxHeight = phoneEl?.style.maxHeight || "";
+          const origPhoneClass = phoneEl?.className || "";
+          const origChatOuterClass = chatOuterEl?.className || "";
+          
+          // Compute the max phone height (matching the JSX: maxHeight = 68 * phoneSize/100 %)
+          // In render-local mode, wrapper is 658px. In preview, get it from DOM.
+          let wrapperHeight = 658;
+          if (chatOuterEl) {
+            const wrapper = chatOuterEl.closest("#phone-preview-wrapper");
+            if (wrapper && (wrapper as HTMLElement).clientHeight > 100) {
+              wrapperHeight = (wrapper as HTMLElement).clientHeight;
+            }
+          }
+          const maxPhoneHeightPx = wrapperHeight * 0.68 * (pSize / 100);
+          
+          if (phoneEl) {
+            // Force phone to fixed full height (remove h-fit)
+            phoneEl.style.height = maxPhoneHeightPx + "px";
+            phoneEl.style.maxHeight = maxPhoneHeightPx + "px";
+            phoneEl.classList.remove("h-fit");
+          }
+          if (chatOuterEl) {
+            // Force chatOuter to fill remaining space (flex-1 instead of flex-shrink)
+            chatOuterEl.classList.remove("flex-shrink");
+            chatOuterEl.style.flex = "1";
+            chatOuterEl.style.overflow = "hidden";
+          }
+          
+          // Wait for layout to stabilize with new forced dimensions
+          await new Promise((r) => setTimeout(r, 100));
+          
+          const outerH = chatOuterEl ? chatOuterEl.clientHeight : 0;
+          console.log("Pagination: wrapperH=" + wrapperHeight + " maxPhoneH=" + maxPhoneHeightPx + " chatOuterH=" + outerH + " phoneElH=" + (phoneEl?.clientHeight || 0));
+          
+          // STEP 2: Run the pre-computation loop
+          for (let idx = 0; idx < msgList.length; idx++) {
+            const msg = msgList[idx];
+            queue.push(msg);
+            setVisibleMessages([...queue]);
+            
+            await new Promise((r) => setTimeout(r, 50));
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            
+            if (chatInnerRef.current && chatOuterEl) {
+              const innerH = chatInnerRef.current.scrollHeight;
+              const currentOuterH = chatOuterEl.clientHeight;
+              if (innerH > currentOuterH && currentOuterH > 0) {
+                console.log("Page break at idx=" + idx + " innerH=" + innerH + " > outerH=" + currentOuterH);
+                pages.push(idx);
+                queue.length = 0;
+                queue.push(msg);
+                setVisibleMessages([...queue]);
+                await new Promise((r) => setTimeout(r, 50));
+                await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+              }
+            }
+          }
+          
+          // STEP 3: Restore original h-fit styles
+          if (phoneEl) {
+            phoneEl.style.height = origPhoneHeight;
+            phoneEl.style.maxHeight = origPhoneMaxHeight;
+            phoneEl.className = origPhoneClass;
+          }
+          if (chatOuterEl) {
+            chatOuterEl.className = origChatOuterClass;
+            chatOuterEl.style.flex = "";
+            chatOuterEl.style.overflow = "";
+          }
+          
+          // Clear messages and wait for layout to restore
+          setVisibleMessages([]);
+          await new Promise((r) => setTimeout(r, 100));
+          
+          (window as any).pageStartIndices = pages;
+          console.log("Pagination computation complete. Pages start at indices:", pages);
+        }
         
         setPlaying(true);
       };
@@ -796,7 +930,6 @@ export default function ChatStoryGenerator() {
         const data = (window as any).projectData;
         const msgList = data.messages || [];
         const startTimes = data.startTimesSec || [];
-        const currentChatTheme = data.chatTheme || "imessage";
 
         let visibleIdx = -1;
         for (let idx = 0; idx < msgList.length; idx++) {
@@ -807,11 +940,32 @@ export default function ChatStoryGenerator() {
           }
         }
 
-        const visibleSlice = msgList.slice(0, visibleIdx + 1);
-        setVisibleMessages(visibleSlice);
+        if (visibleIdx === -1) {
+          setVisibleMessages([]);
+          return;
+        }
 
-        if (visibleSlice.length > 0) {
-          const lastMsg = visibleSlice[visibleSlice.length - 1];
+        let finalVisible: Msg[] = [];
+
+        if (data.scrollMode === "page" && (window as any).pageStartIndices) {
+          const pages: number[] = (window as any).pageStartIndices;
+          let startIdx = 0;
+          for (const p of pages) {
+            if (p <= visibleIdx) {
+              startIdx = p;
+            } else {
+              break;
+            }
+          }
+          finalVisible = msgList.slice(startIdx, visibleIdx + 1);
+          setVisibleMessages(finalVisible);
+        } else {
+          finalVisible = msgList.slice(0, visibleIdx + 1);
+          setVisibleMessages(finalVisible);
+        }
+
+        if (finalVisible.length > 0) {
+          const lastMsg = finalVisible[finalVisible.length - 1];
           const lastMsgChatId = lastMsg.chatId || (data.chats?.[0]?.id);
           if (lastMsgChatId) {
             setPlayingChatId(lastMsgChatId);
@@ -1034,6 +1188,8 @@ export default function ChatStoryGenerator() {
         chats: storedChats,
         createdAt: Date.now(),
         audioLibrary,
+        edits,
+        globalEdits,
       };
       await saveProject(project);
       await refreshProjects();
@@ -1094,6 +1250,7 @@ export default function ChatStoryGenerator() {
     setIsGroupChat(p.isGroupChat);
     setMessageDelay(p.messageDelay);
     setProjectName(p.projectName);
+    loadProjectEdits(p);
 
     // Extract audios from loaded project and set generatedAudios
     const initialAudios: { id: string; voiceName: string; text: string; audioUrl: string }[] = [];
@@ -1165,6 +1322,7 @@ export default function ChatStoryGenerator() {
     setBubbleBorderRadius(Number(localStorage.getItem("hud_bubble_border_radius")) || 8);
     setShadowStrength(Number(localStorage.getItem("hud_shadow_strength")) || 50);
     setGlassOpacity(Number(localStorage.getItem("hud_glass_opacity")) || 100);
+    setScrollMode((localStorage.getItem("hud_scroll_mode") as "continuous" | "page") || "continuous");
   }, []);
   useEffect(() => {
     localStorage.setItem("elevenlabs_api_key", elevenKey);
@@ -1210,6 +1368,9 @@ export default function ChatStoryGenerator() {
   useEffect(() => {
     localStorage.setItem("hud_glass_opacity", String(glassOpacity));
   }, [glassOpacity]);
+  useEffect(() => {
+    localStorage.setItem("hud_scroll_mode", scrollMode);
+  }, [scrollMode]);
   useEffect(() => {
     localStorage.setItem("chat_theme", chatTheme);
   }, [chatTheme]);
@@ -2849,18 +3010,57 @@ Regras CRÍTICAS:
         await waitWhilePaused();
         if (stopRequestedRef.current) break;
         const msg = chat.messages[i];
+        
         queue.push(msg);
         globalIdx++;
         setCurrentMsgIndex(globalIdx);
         setVisibleMessages([...queue]);
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        
+        if (scrollMode === "page") {
+          if (chatInnerRef.current && chatOuterRef.current) {
+            const wrapper = chatOuterRef.current.closest("#phone-preview-wrapper");
+            const wrapperHeight = wrapper ? wrapper.clientHeight : 500;
+            const maxPhoneHeight = wrapperHeight * 0.68 * (phoneSize / 100);
+            
+            const phoneEl = chatOuterRef.current.closest("#phone-preview-phone");
+            const headerEl = phoneEl ? phoneEl.querySelector(".shrink-0") : null;
+            const headerHeight = headerEl ? headerEl.clientHeight : 55;
+            
+            const maxChatHeight = maxPhoneHeight - headerHeight - 10;
+            
+            if (chatInnerRef.current.scrollHeight > maxChatHeight) {
+               queue.length = 0;
+               queue.push(msg);
+               setVisibleMessages([...queue]);
+               await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+               if (chatInnerRef.current) chatInnerRef.current.style.transform = "translateY(0px)";
+            }
+          }
+        }
+        
         scrollDown();
         // Captura o frame ANTES de tocar o áudio
         if (onFrameReady) await onFrameReady();
         if (msg.type === "text" && msg.audioUrl) {
+          const key = `${msg.chatId || displayChat.id}_${msg.id}`;
+          const edit = edits[key] || {};
+          const processed = processedAudios[key];
+          const audioUrl = processed?.audioUrl || msg.audioUrl;
+
           const rec = recordingCtxRef.current;
-          const audio = new Audio(msg.audioUrl);
+          const audio = new Audio(audioUrl);
           currentAudioRef.current = audio;
+
+          // Apply volume
+          audio.volume = edit.volume !== undefined ? edit.volume : (globalEdits.volume || 1.0);
+          
+          const isProcessed = !!processed;
+          // Apply speed if not already baked into the processed audio
+          if (!isProcessed && edit.speed) {
+            audio.playbackRate = edit.speed;
+          }
+
           if (rec) {
             try {
               const src = rec.audioCtx.createMediaElementSource(audio);
@@ -2875,8 +3075,14 @@ Regras CRÍTICAS:
             else audio.addEventListener("loadedmetadata", () => resolve(), { once: true });
           });
           audio.play().catch((err) => console.error("audio play failed", err));
-          const durationMs = (audio.duration || 0) * 1000;
-          const waitTime = Math.max(0, durationMs + delayMs);
+
+          const speed = edit.speed !== undefined ? edit.speed : globalEdits.speed;
+          const durationMs = isProcessed
+            ? (processed.duration * 1000)
+            : ((audio.duration || 0) * 1000) / (speed || 1.0);
+
+          const individualDelay = edit.delay !== undefined ? edit.delay : globalEdits.delay;
+          const waitTime = Math.max(0, durationMs + individualDelay);
           await waitInterruptible(waitTime);
           currentAudioRef.current = null;
         }
@@ -3641,46 +3847,72 @@ Regras CRÍTICAS:
     setLocalExportProgress(5);
 
     try {
+      // Pre-process any message that has edits but hasn't been processed yet
+      toast.info("Processando edições de áudio...");
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (msg.type === "text" && msg.audioUrl) {
+          const key = `${msg.chatId || displayChat.id}_${msg.id}`;
+          if (edits[key] && !processedAudios[key]) {
+            toast.info(`Processando efeitos para a mensagem ${i + 1}...`);
+            await triggerAudioProcessing(msg.chatId || displayChat.id, msg.id, msg.audioUrl);
+          }
+        }
+      }
+
       // 1) Mix audio offline
       const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AC();
       const tracksInfo: { duration: number; buffer: AudioBuffer | null }[] = [];
-      const delaySec = (Number(messageDelay) || 0) / 1000;
       let totalDurationSec = 0;
 
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
+        const key = `${msg.chatId || displayChat.id}_${msg.id}`;
+        const edit = edits[key] || {};
+        const delay = edit.delay !== undefined ? edit.delay : globalEdits.delay;
+        const delaySec = delay / 1000;
+
         if (msg.type === "image") {
-          tracksInfo.push({ buffer: null, duration: 2.0 });
-          totalDurationSec += 2.0;
+          const duration = 2.0 + delaySec;
+          tracksInfo.push({ buffer: null, duration });
+          totalDurationSec += duration;
           continue;
         }
         if (msg.type === "video") {
           const url = msg.videoUrl;
+          const vidDur = videoDurations[url] || 3.0;
           if (url) {
             try {
               const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
               const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-              const durationSec = audioBuffer.duration;
+              const durationSec = audioBuffer.duration + delaySec;
               tracksInfo.push({ buffer: audioBuffer, duration: durationSec });
               totalDurationSec += durationSec;
             } catch (videoAudioErr) {
-              const durationSec = await getVideoDuration(url);
+              const durationSec = vidDur + delaySec;
               tracksInfo.push({ buffer: null, duration: durationSec });
               totalDurationSec += durationSec;
             }
           } else {
-            tracksInfo.push({ buffer: null, duration: 3.0 });
-            totalDurationSec += 3.0;
+            const duration = 3.0 + delaySec;
+            tracksInfo.push({ buffer: null, duration });
+            totalDurationSec += duration;
           }
           continue;
         }
-        const url = msg.type === "text" ? (msg as any).audioUrl : null;
+
+        // Text messages
+        const processed = processedAudios[key];
+        const url = processed?.audioUrl || msg.audioUrl;
+        
         if (!url) {
-          tracksInfo.push({ buffer: null, duration: 2.5 });
-          totalDurationSec += 2.5;
+          const duration = 2.5 + delaySec;
+          tracksInfo.push({ buffer: null, duration });
+          totalDurationSec += duration;
           continue;
         }
+
         try {
           const arrayBuffer = await fetch(url).then((r) => r.arrayBuffer());
           const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -3688,8 +3920,9 @@ Regras CRÍTICAS:
           tracksInfo.push({ buffer: audioBuffer, duration: step });
           totalDurationSec += step;
         } catch (decodeErr) {
-          tracksInfo.push({ buffer: null, duration: 2.0 });
-          totalDurationSec += 2.0;
+          const duration = 2.0 + delaySec;
+          tracksInfo.push({ buffer: null, duration });
+          totalDurationSec += duration;
         }
       }
       totalDurationSec = Math.max(1, totalDurationSec + 1);
@@ -3716,8 +3949,35 @@ Regras CRÍTICAS:
 
       setLocalExportProgress(40);
 
+      // Crop the mixed AudioBuffer using global trimStart and trimEnd
+      const trimStart = globalEdits.trimStart || 0;
+      const trimEnd = globalEdits.trimEnd !== undefined ? globalEdits.trimEnd : totalDurationSec;
+      
+      let finalAudio = renderedAudio;
+      if (trimStart > 0 || trimEnd < totalDurationSec) {
+        const sampleRate = renderedAudio.sampleRate;
+        const startSample = Math.floor(trimStart * sampleRate);
+        const endSample = Math.floor(trimEnd * sampleRate);
+        const frameCount = Math.max(1, endSample - startSample);
+        
+        const croppedBuffer = offlineCtx.createBuffer(
+          renderedAudio.numberOfChannels,
+          frameCount,
+          sampleRate
+        );
+        
+        for (let c = 0; c < renderedAudio.numberOfChannels; c++) {
+          const originalData = renderedAudio.getChannelData(c);
+          const croppedData = croppedBuffer.getChannelData(c);
+          for (let k = 0; k < frameCount; k++) {
+            croppedData[k] = originalData[startSample + k] || 0;
+          }
+        }
+        finalAudio = croppedBuffer;
+      }
+
       // Convert mixed AudioBuffer to WAV ArrayBuffer
-      const wavArrBuffer = audioBufferToWav(renderedAudio);
+      const wavArrBuffer = audioBufferToWav(finalAudio);
       const audioBlob = new Blob([wavArrBuffer], { type: "audio/wav" });
 
       setLocalExportProgress(50);
@@ -3728,6 +3988,9 @@ Regras CRÍTICAS:
         startTimesSec.push(currentAcc);
         currentAcc += tracksInfo[j].duration;
       }
+      
+      // Update duration to reflect the trimmed video length
+      totalDurationSec = Math.max(0.1, trimEnd - trimStart);
 
       // Build FormData to send media as binary blobs natively (uses virtually 0 extra RAM)
       const formData = new FormData();
@@ -3782,10 +4045,18 @@ Regras CRÍTICAS:
 
       setLocalExportProgress(80);
 
+      // Collect processedAudioDurations for the renderer
+      const processedAudioDurations: Record<string, number> = {};
+      Object.entries(processedAudios).forEach(([k, val]) => {
+        processedAudioDurations[k] = val.duration;
+      });
+
       const payload = {
         origin: window.location.origin,
         fps: exportFps,
         duration: totalDurationSec,
+        trimStart: globalEdits.trimStart || 0,
+        trimEnd: globalEdits.trimEnd !== undefined ? globalEdits.trimEnd : (globalEdits.trimEnd || totalDurationSec),
         projectName: projectName,
         chatTheme: chatTheme,
         activeBackground: bgVideoFilename ? bgVideoFilename : activeBackground,
@@ -3798,6 +4069,7 @@ Regras CRÍTICAS:
         bubbleBorderRadius: bubbleBorderRadius,
         shadowStrength: shadowStrength,
         glassOpacity: glassOpacity,
+        scrollMode: scrollMode,
         bgVideoOffset: bgVideoOffset,
         chats: chats.map(c => ({
           ...c,
@@ -3823,7 +4095,10 @@ Regras CRÍTICAS:
         })),
         messages: cleanMessages,
         startTimesSec: startTimesSec,
-        outputName: (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_")
+        outputName: (projectName.trim() || "chat-story").replace(/[^a-z0-9-_]+/gi, "_"),
+        edits,
+        globalEdits,
+        processedAudioDurations,
       };
 
       formData.append("project", JSON.stringify(payload));
@@ -3866,6 +4141,171 @@ Regras CRÍTICAS:
     ? chats.find((c) => c.id === playingChatId) || activeChat
     : activeChat;
 
+  const [timelineTime, setTimelineTime] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
+  const timelineAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const activeAudioMsgKeyRef = useRef<string | null>(null);
+
+  const activeChatTotalDuration = useMemo(() => {
+    let accumulatedTime = 0;
+    displayChat.messages.forEach((msg) => {
+      accumulatedTime += getEffectiveDuration(displayChat.id, msg);
+    });
+    return accumulatedTime;
+  }, [displayChat.messages, displayChat.id, getEffectiveDuration]);
+
+  // Pre-populate audio duration cache when messages change
+  // This ensures the timeline shows real durations instead of the 2.5s fallback
+  useEffect(() => {
+    displayChat.messages.forEach((msg) => {
+      if (msg.type === "text" && msg.audioUrl) {
+        cacheAudioDuration(msg.audioUrl);
+      }
+    });
+  }, [displayChat.messages, cacheAudioDuration]);
+
+  // Sync preview with timeline playhead time (in seconds)
+  useEffect(() => {
+    if (activeSection !== "edit") return;
+    
+    let elapsed = 0;
+    let visibleMsgs: Msg[] = [];
+    
+    for (let i = 0; i < displayChat.messages.length; i++) {
+      const msg = displayChat.messages[i];
+      const duration = getEffectiveDuration(displayChat.id, msg);
+      
+      if (elapsed + duration >= timelineTime) {
+        visibleMsgs.push(msg);
+        break;
+      } else {
+        visibleMsgs.push(msg);
+      }
+      elapsed += duration;
+    }
+    
+    setPlayingChatId(displayChat.id);
+    setVisibleMessages(visibleMsgs);
+    
+    setTimeout(() => {
+      const el = chatScrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }, 50);
+  }, [timelineTime, activeSection, displayChat.messages, displayChat.id, getEffectiveDuration]);
+
+  // Animates the timeline playhead when timelinePlaying is true
+  useEffect(() => {
+    if (!timelinePlaying) {
+      if (timelineAudioRef.current) {
+        timelineAudioRef.current.pause();
+      }
+      return;
+    }
+
+    let animFrame: number;
+    lastTimeRef.current = Date.now();
+
+    const loop = () => {
+      const now = Date.now();
+      const delta = (now - lastTimeRef.current) / 1000;
+      lastTimeRef.current = now;
+
+      setTimelineTime((t) => {
+        const next = t + delta;
+        if (next >= activeChatTotalDuration) {
+          setTimelinePlaying(false);
+          return activeChatTotalDuration;
+        }
+        return next;
+      });
+
+      animFrame = requestAnimationFrame(loop);
+    };
+
+    animFrame = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animFrame);
+  }, [timelinePlaying, activeChatTotalDuration]);
+
+  // Sync play/pause of audio elements while timeline is playing/scrubbed
+  useEffect(() => {
+    if (activeSection !== "edit") return;
+    
+    let elapsed = 0;
+    let activeSeg: any = null;
+    let activeStart = 0;
+
+    for (const msg of displayChat.messages) {
+      const duration = getEffectiveDuration(displayChat.id, msg);
+      if (elapsed + duration >= timelineTime) {
+        activeSeg = msg;
+        activeStart = elapsed;
+        break;
+      }
+      elapsed += duration;
+    }
+
+    if (!activeSeg || activeSeg.type !== "text") {
+      if (timelineAudioRef.current) {
+        timelineAudioRef.current.pause();
+        timelineAudioRef.current = null;
+      }
+      activeAudioMsgKeyRef.current = null;
+      return;
+    }
+
+    const key = `${displayChat.id}_${activeSeg.id}`;
+    const edit = edits[key] || {};
+    const audioUrl = processedAudios[key]?.audioUrl || activeSeg.audioUrl;
+
+    if (!audioUrl) return;
+
+    const offset = timelineTime - activeStart;
+
+    if (activeAudioMsgKeyRef.current !== key) {
+      if (timelineAudioRef.current) {
+        timelineAudioRef.current.pause();
+      }
+
+      const audio = new Audio(audioUrl);
+      timelineAudioRef.current = audio;
+      activeAudioMsgKeyRef.current = key;
+
+      audio.volume = edit.volume !== undefined ? edit.volume : (globalEdits.volume || 1.0);
+
+      const isProcessed = !!processedAudios[key];
+      if (!isProcessed && edit.speed) {
+        audio.playbackRate = edit.speed;
+      }
+
+      const seekOffset = isProcessed ? offset : offset * (edit.speed || 1.0);
+      audio.currentTime = Math.max(0, seekOffset);
+
+      if (timelinePlaying) {
+        audio.play().catch(() => {});
+      }
+    } else {
+      const audio = timelineAudioRef.current;
+      if (audio && timelinePlaying) {
+        const isProcessed = !!processedAudios[key];
+        const targetOffset = isProcessed ? offset : offset * (edit.speed || 1.0);
+        if (Math.abs(audio.currentTime - targetOffset) > 0.4) {
+          audio.currentTime = Math.max(0, targetOffset);
+        }
+        if (audio.paused) {
+          audio.play().catch(() => {});
+        }
+      }
+    }
+  }, [timelineTime, timelinePlaying, activeSection, displayChat.id, edits, processedAudios, globalEdits.volume]);
+
+  useEffect(() => {
+    if (activeSection !== "edit") {
+      setTimelinePlaying(false);
+      setTimelineTime(0);
+    }
+  }, [activeSection]);
+
   const isWA = chatTheme === "whatsapp";
   const effectiveGroupChat = displayChat.isGroupChat ?? isGroupChat;
 
@@ -3897,6 +4337,7 @@ Regras CRÍTICAS:
             { id: "media", label: "Mídias (Imagens/Vídeo)", icon: ImageIcon },
             { id: "generation", label: "Sintetizar Áudio", icon: Cpu },
             { id: "hud", label: "Customizar HUD", icon: Sliders },
+            { id: "edit", label: "Edição (Timeline)", icon: SlidersHorizontal, disabled: !allAudiosReady },
             { id: "export", label: "Exportar Vídeo", icon: Download },
             { id: "settings", label: "Avançado", icon: Settings },
           ].map((item) => {
@@ -5627,7 +6068,7 @@ Regras CRÍTICAS:
                   <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5 md:col-span-2">
                     <h3 className="text-xs font-semibold text-zinc-200 border-b border-zinc-800/50 pb-2">Estilos e Efeitos de Transparência</h3>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <Label className="text-xs text-zinc-350">Arredondamento do Balão</Label>
@@ -5676,6 +6117,33 @@ Regras CRÍTICAS:
                         />
                         <p className="text-[8px] text-zinc-450 leading-tight">
                           Valores abaixo de 100% revelam o vídeo de gameplay por trás do chat!
+                        </p>
+                      </div>
+
+                      <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/20 p-5 mt-4">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-zinc-350">Modo de Rolagem</Label>
+                        </div>
+                        <div className="flex items-center space-x-2 bg-black/40 p-1 rounded-lg">
+                          <Button 
+                            variant={scrollMode === "continuous" ? "default" : "ghost"}
+                            size="sm"
+                            className={`flex-1 h-7 text-xs ${scrollMode === "continuous" ? "bg-purple-600 hover:bg-purple-700" : "text-zinc-400"}`}
+                            onClick={() => setScrollMode("continuous")}
+                          >
+                            Contínua
+                          </Button>
+                          <Button 
+                            variant={scrollMode === "page" ? "default" : "ghost"}
+                            size="sm"
+                            className={`flex-1 h-7 text-xs ${scrollMode === "page" ? "bg-purple-600 hover:bg-purple-700" : "text-zinc-400"}`}
+                            onClick={() => setScrollMode("page")}
+                          >
+                            Páginas
+                          </Button>
+                        </div>
+                        <p className="text-[10px] text-zinc-450 leading-tight">
+                          {scrollMode === "continuous" ? "A conversa rola para cima infinitamente." : "Limpa a tela quando chega no final (Paginação)."}
                         </p>
                       </div>
                     </div>
@@ -6063,6 +6531,65 @@ Regras CRÍTICAS:
                 </div>
               </div>
             )}
+
+            {/* SEÇÃO: EDIÇÃO */}
+            {activeSection === "edit" && (
+              <div className="space-y-4 w-full h-full flex flex-col">
+                <GlobalControls messages={displayChat.messages} chatId={displayChat.id} />
+
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 items-start flex-1">
+                  {/* Timeline — 3/5 */}
+                  <div className="xl:col-span-3">
+                    <Timeline
+                      messages={displayChat.messages}
+                      chatId={displayChat.id}
+                      currentTime={timelineTime}
+                      onTimeChange={(t) => setTimelineTime(t)}
+                      isPlaying={timelinePlaying}
+                      onPlayPause={() => setTimelinePlaying(!timelinePlaying)}
+                    />
+                  </div>
+
+                  {/* Edit Panel — 2/5 */}
+                  <div className="xl:col-span-2 min-h-[300px] rounded-2xl overflow-hidden border border-zinc-800">
+                    {selectedMsgKey ? (() => {
+                      // selectedMsgKey format: "${chatId}_${msgId}"
+                      // chatId itself contains underscores (chat_TIMESTAMP_INDEX), so we can't just split("_")[1]
+                      // Instead, slice off the known chatId prefix to get the msgId
+                      const msgIdStr = selectedMsgKey.startsWith(displayChat.id + "_")
+                        ? selectedMsgKey.slice(displayChat.id.length + 1)
+                        : selectedMsgKey.split("_").pop() || "";
+                      const msgId = Number(msgIdStr);
+                      const msgObj = displayChat.messages.find(m => m.id === msgId);
+                      if (!msgObj) return <div className="text-xs text-zinc-500 p-4">Balão não encontrado.</div>;
+                      return (
+                        <MessageEditPanel
+                          chatId={displayChat.id}
+                          msg={msgObj}
+                          onClose={() => setSelectedMsgKey(null)}
+                          onUploadImage={msgObj.type === "image" ? (file) => onUploadImage(msgObj.id, file) : undefined}
+                          onUploadVideo={msgObj.type === "video" ? (file) => onUploadVideo(msgObj.id, file) : undefined}
+                          chatMessages={displayChat.messages}
+                          contactName={displayChat.contactName}
+                        />
+                      );
+                    })() : (
+                      <div className="flex flex-col items-center justify-center h-full min-h-[300px] p-8 bg-zinc-900/20 text-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                          <span className="text-xl">🎛️</span>
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-zinc-300">Nenhum balão selecionado</div>
+                          <div className="text-xs text-zinc-500 mt-1">
+                            Clique em um bloco na timeline para editar pausa, velocidade, volume e SFX.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </main>
 
           {/* 3. STICKY PREVIEW DO CELULAR */}
@@ -6071,7 +6598,7 @@ Regras CRÍTICAS:
               <div
                 id="phone-preview-wrapper"
                 ref={previewRef}
-                className="w-full h-full flex items-center justify-center relative overflow-hidden"
+                className="w-full h-full flex items-start justify-center relative overflow-hidden"
                 style={{
                   background: activeBackground.startsWith("data:image")
                     ? `url(${activeBackground}) center/cover no-repeat`
@@ -6116,7 +6643,7 @@ Regras CRÍTICAS:
                 )}
                 <div
                   id="phone-preview-phone"
-                  className="h-fit flex flex-col overflow-hidden shrink-0 border border-zinc-800 z-10"
+                  className="h-fit relative flex flex-col overflow-hidden shrink-0 border border-zinc-800 z-10"
                   style={{
                     backgroundColor: isWA
                       ? `rgba(11, 20, 26, ${glassOpacity / 100})`
@@ -6124,6 +6651,7 @@ Regras CRÍTICAS:
                     backdropFilter: glassOpacity < 100 ? "blur(10px)" : "none",
                     width: `${92 * (phoneSize / 100)}%`,
                     maxHeight: `${68 * (phoneSize / 100)}%`,
+                    top: `calc((100% - ${68 * (phoneSize / 100)}%) / 2)`,
                     transform: `translateY(${phoneYOffset}px)`,
                     boxShadow: `0 20px ${shadowStrength}px rgba(0,0,0,${shadowStrength / 100})`,
                     borderRadius: `${32 * (bubbleBorderRadius / 8)}px`
@@ -6225,7 +6753,7 @@ Regras CRÍTICAS:
                   >
                     <div
                       ref={chatInnerRef}
-                      className="w-full flex flex-col justify-start pl-1.5 pr-2.5 py-3 gap-0"
+                      className="w-full flex flex-col justify-start pl-1.5 pr-2.5 pt-3 pb-1 gap-0"
                       style={{
                         transform: `translateY(-${exportScroll + (recording ? 0 : previewDragOffset)}px)`,
                       }}
@@ -6299,7 +6827,7 @@ Regras CRÍTICAS:
 
                           const isEndOfBlock = (() => {
                             const next = arr[idx + 1];
-                            if (!next) return true;
+                            if (!next) return false; // Reduce gap at the very bottom
                             if (next.side !== m.side) return true;
                             if (isLeftSide) {
                               const currentSender = getSenderName(m, idx);
